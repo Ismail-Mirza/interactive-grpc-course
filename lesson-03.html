@@ -6,6 +6,7 @@
 <title>Lesson 3: Advanced Proto3 | gRPC Mastery</title>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 <nav class="top-nav">
@@ -20,7 +21,7 @@
   <div class="container">
     <div class="lesson-badge">Lesson 3 of 10 · Beginner+</div>
     <h1>Advanced Proto3</h1>
-    <p class="lesson-subtitle">Master oneof, map fields, nested messages, well-known types, and backward-compatible schema evolution — the patterns your production cplane.proto uses.</p>
+    <p class="lesson-subtitle">Master oneof, map fields, nested messages, well-known types, and backward-compatible schema evolution — the patterns production control plane services use.</p>
     <div class="lesson-meta">
       <span class="lesson-meta-item">⏱ 50 min</span>
       <span class="lesson-meta-item">🔨 Proto3 features</span>
@@ -38,8 +39,8 @@
     <div class="callout architecture">
       <span class="callout-icon">🔮</span>
       <div class="callout-body">
-        <div class="callout-title">Used in your production cplane.proto</div>
-        <div class="callout-text">The <code>StreamMessage</code> in FlowGenX's cplane uses <code>oneof payload</code> so a single message type can carry either an API request, a callback, a heartbeat, or a raw JSON payload — without separate message types for each.</div>
+        <div class="callout-title">Used in production control plane services</div>
+        <div class="callout-text">Real-world streaming message types use <code>oneof payload</code> so a single message type can carry either an API request, a callback, a heartbeat, or a raw JSON payload — without needing separate message types for each case.</div>
       </div>
     </div>
 

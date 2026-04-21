@@ -6,6 +6,7 @@
 <title>Lesson 9: Observability, Health & Testing | gRPC Mastery</title>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 <nav class="top-nav">
@@ -104,7 +105,7 @@ grpcurl -plaintext localhost:50051 describe cplane.ControlPlane</code></pre>
 
   <section class="content-section fade-in">
     <h2><span class="section-icon">📊</span> Prometheus Metrics</h2>
-    <p>Add request count, latency histograms, and active stream gauges — the same metrics FlowGenX's dplane client exports.</p>
+    <p>Add request count, latency histograms, and active stream gauges — standard metrics for any production gRPC service.</p>
 
     <div class="code-block">
       <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Install</span><button class="copy-btn">Copy</button></div>

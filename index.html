@@ -6,6 +6,7 @@
 <title>gRPC Mastery — From Beginner to Production</title>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 
@@ -24,7 +25,7 @@
 
 <header class="index-hero">
   <div class="container">
-    <p class="hero-eyebrow">FlowGenX — B2B Deployment Series</p>
+    <p class="hero-eyebrow">B2B Deployment Series — Control Plane &amp; Data Plane</p>
     <h1>Master <span>gRPC</span><br/>From Zero to Production</h1>
     <p>A complete 10-lesson journey from Protocol Buffers basics to building a production-grade bidirectional streaming cplane↔dplane system.</p>
     <div class="hero-cta">
@@ -71,7 +72,7 @@
       <a href="lesson-01.html" class="lesson-card fade-in" data-lesson="1">
         <div class="card-num">Lesson 01 · Beginner</div>
         <div class="card-title">gRPC vs REST — The Why</div>
-        <div class="card-desc">Understand why gRPC exists, how HTTP/2 differs from HTTP/1.1, and why your cplane↔dplane architecture uses gRPC.</div>
+        <div class="card-desc">Understand why gRPC exists, how HTTP/2 differs from HTTP/1.1, and why B2B cplane↔dplane architectures rely on it.</div>
         <div class="card-footer">
           <div class="card-tags"><span class="card-tag">HTTP/2</span><span class="card-tag">Protobuf</span><span class="card-tag">Concepts</span></div>
           <div class="card-status">→ Start</div>
@@ -170,9 +171,22 @@
 
     </div>
 
+    <!-- Architecture Reference Card -->
+    <div style="margin-top:32px;">
+      <a href="architecture.html" class="lesson-card fade-in" style="display:block;border:2px solid var(--primary);background:linear-gradient(135deg,#ede9fe 0%,#ecfeff 100%);">
+        <div class="card-num" style="color:var(--primary);">Reference Architecture · Advanced</div>
+        <div class="card-title">Production B2B Agentic System with gRPC</div>
+        <div class="card-desc">Complete generic reference architecture for B2B SaaS platforms — full system diagram, connection lifecycle, message flow, proto definition, server/client code, Docker Compose, and Kubernetes hints. All with Mermaid diagrams.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">Architecture</span><span class="card-tag">Mermaid</span><span class="card-tag">Production</span><span class="card-tag">Docker</span></div>
+          <div class="card-status" style="color:var(--primary);">→ View</div>
+        </div>
+      </a>
+    </div>
+
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;margin-top:40px;">
       <h3 style="font-size:20px;font-weight:700;margin-bottom:12px;">🏗️ What You'll Build</h3>
-      <p style="color:var(--text-muted);margin-bottom:20px;">A mini version of FlowGenX's cplane↔dplane system, built step by step across all 10 lessons:</p>
+      <p style="color:var(--text-muted);margin-bottom:20px;">A mini B2B cplane↔dplane system, built step by step across all 10 lessons:</p>
       <div style="font-family:monospace;background:var(--code-bg);color:var(--code-text);padding:24px;border-radius:var(--radius);font-size:13px;line-height:1.8;">
         grpc-demo/<br/>
         ├── proto/<br/>
@@ -193,7 +207,7 @@
 </main>
 
 <footer>
-  <p>Built for FlowGenX B2B Deployment Learning · <a href="https://grpc.io" target="_blank">grpc.io</a> · <a href="https://protobuf.dev" target="_blank">protobuf.dev</a></p>
+  <p>gRPC Mastery · <a href="https://grpc.io" target="_blank">grpc.io</a> · <a href="https://protobuf.dev" target="_blank">protobuf.dev</a></p>
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>

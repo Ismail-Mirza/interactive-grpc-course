@@ -6,6 +6,7 @@
 <title>Lesson 6: Error Handling | gRPC Mastery</title>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 <nav class="top-nav">
@@ -37,12 +38,15 @@
 
     <div class="arch-diagram">
       <p style="font-weight:700;margin-bottom:16px;">gRPC Error Propagation</p>
-      <div class="arch-flow">
-        <div class="arch-box cyan">dplane Client</div>
-        <div class="arch-arrow">→ request →</div>
-        <div class="arch-box primary">cplane Server</div>
-        <div class="arch-arrow">← StatusCode +<br>message + details ←</div>
-        <div class="arch-box">grpc.RpcError</div>
+      <div class="mermaid">
+sequenceDiagram
+    participant D as dplane Client
+    participant C as cplane Server
+
+    D->>C: RPC request
+    Note over C: Validation fails
+    C-->>D: StatusCode + message + details
+    Note over D: grpc.RpcError raised<br/>e.code(), e.details()
       </div>
     </div>
 

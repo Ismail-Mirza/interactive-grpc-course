@@ -6,6 +6,7 @@
 <title>Lesson 4: Unary RPC | gRPC Mastery</title>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 <nav class="top-nav">
@@ -54,28 +55,17 @@
     </div>
 
     <div class="arch-diagram">
-      <p style="font-weight:700;margin-bottom:20px;">Unary RPC Request Flow</p>
-      <div class="arch-flow">
-        <div style="text-align:center;">
-          <div class="arch-box cyan">dplane Client</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">stub.RegisterClient(req)</div>
-        </div>
-        <div class="arch-arrow">
-          →
-          <span>protobuf bytes<br/>over HTTP/2</span>
-        </div>
-        <div style="text-align:center;">
-          <div class="arch-box primary">cplane Server</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">RegisterClient(req, ctx)</div>
-        </div>
-        <div class="arch-arrow">
-          ←
-          <span>RegisterResponse</span>
-        </div>
-        <div style="text-align:center;">
-          <div class="arch-box cyan">dplane Client</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">response.session_id</div>
-        </div>
+      <p style="font-weight:700;margin-bottom:16px;">Unary RPC Request Flow</p>
+      <div class="mermaid">
+sequenceDiagram
+    participant D as dplane Client
+    participant C as cplane Server
+
+    Note over D: stub = ControlPlaneStub(channel)
+    D->>C: RegisterClient(req)<br/>protobuf bytes over HTTP/2
+    Note over C: RegisterClient(req, ctx)
+    C-->>D: RegisterResponse(session_id, status)
+    Note over D: response.session_id ✓
       </div>
     </div>
   </section>

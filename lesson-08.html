@@ -6,6 +6,7 @@
 <title>Lesson 8: Security — TLS & JWT | gRPC Mastery</title>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 <nav class="top-nav">
@@ -20,7 +21,7 @@
   <div class="container">
     <div class="lesson-badge">Lesson 8 of 10 · Advanced</div>
     <h1>Security — TLS &amp; JWT Auth</h1>
-    <p class="lesson-subtitle">Secure your gRPC channel with TLS, generate self-signed certificates, and implement JWT authentication interceptors — exactly how FlowGenX authenticates dplane clients connecting to cplane.</p>
+    <p class="lesson-subtitle">Secure your gRPC channel with TLS, generate self-signed certificates, and implement JWT authentication interceptors — the standard approach for authenticating data plane agents connecting to a control plane.</p>
     <div class="lesson-meta">
       <span class="lesson-meta-item">⏱ 70 min</span>
       <span class="lesson-meta-item">🔐 Security</span>
@@ -56,12 +57,12 @@
 # 1. Generate CA private key and certificate
 openssl genrsa -out ca.key 4096
 openssl req -new -x509 -days 3650 -key ca.key -out ca.crt \
-  -subj "/C=US/O=FlowGenX/CN=FlowGenX-CA"
+  -subj "/C=US/O=Example Corp/CN=Example Corp-CA"
 
 # 2. Generate server private key and CSR
 openssl genrsa -out server.key 4096
 openssl req -new -key server.key -out server.csr \
-  -subj "/C=US/O=FlowGenX/CN=cplane.flowgenx.local"
+  -subj "/C=US/O=Example Corp/CN=cplane.local"
 
 # 3. Sign server cert with CA
 openssl x509 -req -days 365 -in server.csr \
@@ -71,7 +72,7 @@ openssl x509 -req -days 365 -in server.csr \
 # For mTLS — also create client cert
 openssl genrsa -out client.key 4096
 openssl req -new -key client.key -out client.csr \
-  -subj "/C=US/O=FlowGenX/CN=dplane-client"
+  -subj "/C=US/O=Example Corp/CN=dplane-client"
 openssl x509 -req -days 365 -in client.csr \
   -CA ca.crt -CAkey ca.key -CAcreateserial \
   -out client.crt
@@ -115,7 +116,7 @@ ls  # ca.crt  server.crt  server.key  client.crt  client.key</code></pre>
     <h3>Step 3 — TLS Client</h3>
     <div class="code-block">
       <div class="code-header"><span class="code-lang">python</span><span class="code-filename">client.py — TLS channel</span><button class="copy-btn">Copy</button></div>
-      <pre><code class="language-python">def connect_tls(server_address='cplane.flowgenx.local:50051', certs_dir='../certs'):
+      <pre><code class="language-python">def connect_tls(server_address='cplane.local:50051', certs_dir='../certs'):
     with open(f'{certs_dir}/ca.crt', 'rb') as f:
         root_ca = f.read()
 
@@ -141,7 +142,7 @@ ls  # ca.crt  server.crt  server.key  client.crt  client.key</code></pre>
 
   <section class="content-section fade-in">
     <h2><span class="section-icon">🎫</span> JWT Authentication</h2>
-    <p>TLS encrypts the channel. JWT authenticates <em>who</em> is connecting. This is the same pattern used in <code>deployed/cplane/flowgenx_cp_grpc_server/</code> — the cplane validates JWT tokens from dplane clients.</p>
+    <p>TLS encrypts the channel. JWT authenticates <em>who</em> is connecting. In production, the control plane validates JWT bearer tokens from every data plane agent before allowing it onto the bidirectional stream.</p>
 
     <div class="code-block">
       <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Install JWT library</span><button class="copy-btn">Copy</button></div>
@@ -166,7 +167,7 @@ def create_token(client_id: str, tenant_id: str, ttl_hours: int = 24) -> str:
         "tenant_id": tenant_id,
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(hours=ttl_hours),
-        "iss": "cplane.flowgenx.ai",
+        "iss": "cplane.example.com",
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -274,7 +275,7 @@ class DPlaneClient:
         """Call cplane to get a new token (e.g. via separate REST endpoint)."""
         # Example: call OAuth2 token endpoint
         response = requests.post(
-            'https://auth.flowgenx.ai/token',
+            'https://auth.example.com/token',
             data={'client_id': self.client_id, 'client_secret': self.secret}
         )
         data = response.json()

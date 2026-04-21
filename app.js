@@ -131,8 +131,31 @@ function initSmoothScroll() {
   });
 }
 
+/* ---- Mermaid Init ---- */
+function initMermaid() {
+  if (window.mermaid) {
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      themeVariables: {
+        primaryColor: '#ede9fe',
+        primaryTextColor: '#3730a3',
+        primaryBorderColor: '#4f46e5',
+        lineColor: '#6366f1',
+        secondaryColor: '#ecfeff',
+        tertiaryColor: '#f0f4ff',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: '14px',
+      },
+      flowchart: { curve: 'basis', padding: 20 },
+      sequence: { actorMargin: 60, messageMargin: 40 },
+    });
+  }
+}
+
 /* ---- Boot ---- */
 document.addEventListener('DOMContentLoaded', () => {
+  initMermaid();
   initCopyButtons();
   initTabs();
   initCompleteBtn();

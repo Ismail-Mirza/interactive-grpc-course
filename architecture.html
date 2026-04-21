@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Production B2B Agentic Architecture with gRPC | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">← All Lessons</a>
+    </div>
+    <div class="nav-progress-wrap">
+      <span class="nav-progress-count">0/10</span>
+      <div class="nav-progress-bar"><div class="nav-progress-fill"></div></div>
+    </div>
+  </div>
+</nav>
+
+<header class="lesson-hero">
+  <div class="container">
+    <div class="lesson-badge">Reference Architecture · Advanced</div>
+    <h1>Production B2B Agentic System with gRPC</h1>
+    <p class="lesson-subtitle">A complete generic reference architecture for any B2B SaaS platform that runs agent workers in customer networks — with full Mermaid diagrams, proto definitions, Python code, Docker Compose, and Kubernetes guidance.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">📐 Architecture</span>
+      <span class="lesson-meta-item">🔒 Security patterns</span>
+      <span class="lesson-meta-item">🐳 Docker + K8s</span>
+    </div>
+  </div>
+</header>
+
+<main>
+<div class="container">
+
+  <!-- Section 1: The Big Picture -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🏗️</span> The Big Picture</h2>
+    <p>Many B2B SaaS platforms need to run software agents <strong>inside customer networks</strong> — for data access, local processing, or compliance. These agents (data planes) cannot be reached from the outside because of corporate firewalls. gRPC bidirectional streaming solves this by having agents connect <em>outbound</em> to the SaaS control plane and receive commands through that persistent connection.</p>
+
+    <div class="callout architecture">
+      <span class="callout-icon">🔮</span>
+      <div class="callout-body">
+        <div class="callout-title">Design Principle: Outbound-Only Connections</div>
+        <div class="callout-text">The data plane never exposes a listening port to the internet. It opens a single outbound TCP connection (TLS-encrypted) to the control plane. All commands, configuration, and callbacks flow over that one persistent bidirectional gRPC stream. This means zero inbound firewall rules on the customer side.</div>
+      </div>
+    </div>
+
+    <div class="arch-diagram">
+      <p style="font-weight:700;margin-bottom:16px;font-size:18px;">Full System Architecture</p>
+      <div class="mermaid">
+graph TB
+    subgraph customer1["🏢 Customer A — Network A"]
+        A_BL["Agent Workers\nBusiness Logic"]
+        A_DB["Local Database\nData Sources"]
+        A_GC["gRPC Client\nData Plane Agent"]
+        A_BL --> A_GC
+        A_DB --> A_GC
+    end
+
+    subgraph customer2["🏢 Customer B — Network B"]
+        B_BL["Agent Workers\nBusiness Logic"]
+        B_GC["gRPC Client\nData Plane Agent"]
+        B_BL --> B_GC
+    end
+
+    subgraph saas["☁️ SaaS Control Plane — Cloud"]
+        GW["gRPC Gateway\n:443 TLS"]
+        AUTH["Auth Service\nJWT / OAuth2"]
+        ROUTER["Command Router\nAgent Registry"]
+        QUEUE["Message Queue\nRedis / Kafka"]
+        CMDB["Control DB\nPostgreSQL"]
+        OBS["Observability\nPrometheus + Jaeger"]
+
+        GW --> AUTH
+        GW --> ROUTER
+        ROUTER --> QUEUE
+        ROUTER --> CMDB
+        GW --> OBS
+    end
+
+    A_GC -->|"TLS + JWT\nOutbound :443"| GW
+    B_GC -->|"TLS + JWT\nOutbound :443"| GW
+
+    style customer1 fill:#ecfeff,stroke:#0e7490,stroke-width:2px,stroke-dasharray:6
+    style customer2 fill:#ecfeff,stroke:#0e7490,stroke-width:2px,stroke-dasharray:6
+    style saas fill:#ede9fe,stroke:#4f46e5,stroke-width:2px,stroke-dasharray:6
+    style GW fill:#4f46e5,color:#fff,stroke:#3730a3
+    style A_GC fill:#06b6d4,color:#fff,stroke:#0e7490
+    style B_GC fill:#06b6d4,color:#fff,stroke:#0e7490
+    style AUTH fill:#10b981,color:#fff,stroke:#047857
+    style QUEUE fill:#f59e0b,color:#fff,stroke:#d97706
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 2: Connection Lifecycle -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔄</span> Connection Lifecycle</h2>
+    <p>Understanding the exact sequence of events from agent startup through steady-state operation and reconnection is critical for building reliable systems.</p>
+
+    <div class="arch-diagram">
+      <p style="font-weight:700;margin-bottom:16px;">Agent Connection Lifecycle</p>
+      <div class="mermaid">
+sequenceDiagram
+    participant A as Data Plane Agent
+    participant CP as Control Plane
+    participant Auth as Auth Service
+    participant DB as Control DB
+
+    Note over A: Agent starts up
+    A->>Auth: POST /token {client_id, secret}
+    Auth-->>A: JWT {sub, tenant, exp}
+
+    A->>CP: TCP connect (TLS handshake)
+    Note over CP: Verify TLS certificate
+
+    A->>CP: RegisterAgent(agent_id, tenant_id, version, capabilities)
+    CP->>Auth: verify JWT token
+    Auth-->>CP: token valid
+    CP->>DB: INSERT agent_registry
+    DB-->>CP: ok
+    CP-->>A: RegisterResponse(session_id, server_time)
+
+    Note over A,CP: Bidirectional stream open
+
+    loop Steady state
+        A->>CP: Heartbeat(session_id, metrics)
+        CP-->>A: HeartbeatAck OR Command(action, payload)
+        A->>CP: CommandResult(command_id, status, output)
+    end
+
+    Note over A: Network interruption
+    A-xCP: connection dropped
+
+    Note over A: Exponential backoff (1s → 2s → 4s → ... → 60s)
+    A->>Auth: POST /token (refresh)
+    Auth-->>A: new JWT
+    A->>CP: TCP reconnect (TLS)
+    A->>CP: RegisterAgent (same agent_id)
+    CP->>DB: UPDATE agent_registry (reconnect)
+    CP-->>A: RegisterResponse (new session_id)
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 3: Message Flow -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📨</span> Command & Callback Flow</h2>
+    <p>Once the agent is registered and streaming, the control plane can push commands at any time. The agent processes them and sends callbacks — all over the same persistent stream.</p>
+
+    <div class="arch-diagram">
+      <p style="font-weight:700;margin-bottom:16px;">Command Push and Callback Pattern</p>
+      <div class="mermaid">
+sequenceDiagram
+    participant API as REST API<br/>(Control Plane)
+    participant Q as Message Queue
+    participant CP as gRPC Stream Handler
+    participant A as Data Plane Agent
+
+    Note over API,A: Operator triggers a command via REST API
+
+    API->>Q: enqueue command {agent_id, action, params}
+    Q-->>CP: dequeue for active agent session
+    CP-->>A: Command{id, action="run_query", payload}
+
+    Note over A: Agent executes locally
+    A->>CP: CommandResult{id, status=RUNNING, progress=20%}
+    CP->>Q: publish status update
+    A->>CP: CommandResult{id, status=RUNNING, progress=80%}
+    CP->>Q: publish status update
+    A->>CP: CommandResult{id, status=COMPLETED, output=data}
+    CP->>Q: publish final result
+    Q-->>API: notify completion
+    Note over API: Webhook / polling available to client
+      </div>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">💡</span>
+      <div class="callout-body">
+        <div class="callout-title">Why a Queue Between REST API and gRPC?</div>
+        <div class="callout-text">Agents may be temporarily offline during reconnection. The queue buffers commands so they are delivered when the agent reconnects. This decouples command submission from delivery and gives you retry semantics for free.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 4: Proto Definition -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📋</span> Proto Definition — Generic Agent Platform</h2>
+    <p>This proto covers the full set of messages needed for a production agent platform. It is intentionally generic — rename services and fields to match your domain.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">protobuf</span><span class="code-filename">proto/agent_platform.proto</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-protobuf">syntax = "proto3";
+package agentplatform.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ── Service ──────────────────────────────────────────────────────────────────
+
+service ControlPlane {
+  // One-time registration — unary
+  rpc RegisterAgent(RegisterRequest) returns (RegisterResponse);
+
+  // Persistent bidirectional channel — the core of the system
+  rpc AgentStream(stream AgentMessage) returns (stream ServerMessage);
+
+  // Health check — unary
+  rpc GetAgentStatus(StatusRequest) returns (StatusResponse);
+}
+
+// ── Registration ─────────────────────────────────────────────────────────────
+
+message RegisterRequest {
+  string agent_id    = 1;  // stable, unique per deployment
+  string tenant_id   = 2;  // which customer/tenant this agent belongs to
+  string version     = 3;  // agent software version
+  repeated string capabilities = 4;  // ["sql", "file_transfer", "ml_inference"]
+  map<string, string> metadata = 5;  // region, datacenter, env, etc.
+}
+
+message RegisterResponse {
+  string session_id             = 1;  // server-assigned per connection
+  google.protobuf.Timestamp server_time = 2;
+  int32  heartbeat_interval_sec = 3;  // server tells client how often to heartbeat
+  repeated string enabled_commands = 4;  // what commands are allowed for this agent
+}
+
+// ── Bidirectional Stream Messages ─────────────────────────────────────────────
+
+// Messages FROM agent TO server
+message AgentMessage {
+  string session_id = 1;
+
+  oneof payload {
+    Heartbeat         heartbeat      = 10;
+    CommandResult     command_result = 11;
+    AgentMetrics      metrics        = 12;
+    ErrorReport       error_report   = 13;
+  }
+}
+
+// Messages FROM server TO agent
+message ServerMessage {
+  oneof payload {
+    HeartbeatAck  heartbeat_ack = 10;
+    Command       command       = 11;
+    ConfigUpdate  config_update = 12;
+    Shutdown      shutdown      = 13;
+  }
+}
+
+// ── Heartbeat ─────────────────────────────────────────────────────────────────
+
+message Heartbeat {
+  google.protobuf.Timestamp sent_at = 1;
+  string status = 2;          // "healthy" | "degraded" | "overloaded"
+  AgentMetrics metrics = 3;
+}
+
+message HeartbeatAck {
+  google.protobuf.Timestamp server_time = 1;
+  string server_status = 2;
+}
+
+// ── Commands ──────────────────────────────────────────────────────────────────
+
+message Command {
+  string command_id = 1;
+  string action     = 2;  // "run_query", "upload_file", "reload_config", etc.
+  google.protobuf.Struct params = 3;  // arbitrary JSON params
+  int32  timeout_sec = 4;
+  google.protobuf.Timestamp issued_at = 5;
+}
+
+message CommandResult {
+  string command_id = 1;
+
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    RUNNING            = 1;
+    COMPLETED          = 2;
+    FAILED             = 3;
+    TIMED_OUT          = 4;
+  }
+  Status status = 2;
+
+  google.protobuf.Struct output = 3;
+  string error_message = 4;
+  int32  progress_pct  = 5;  // 0-100 for streaming progress
+  google.protobuf.Timestamp completed_at = 6;
+}
+
+// ── Config & Control ──────────────────────────────────────────────────────────
+
+message ConfigUpdate {
+  string version = 1;
+  google.protobuf.Struct config = 2;
+}
+
+message Shutdown {
+  string reason       = 1;
+  int32  delay_sec    = 2;  // graceful shutdown window
+  bool   reconnect_ok = 3;  // false = permanent decommission
+}
+
+// ── Metrics & Errors ──────────────────────────────────────────────────────────
+
+message AgentMetrics {
+  float cpu_pct       = 1;
+  float memory_pct    = 2;
+  int64 tasks_queued  = 3;
+  int64 tasks_completed = 4;
+  map<string, float> custom = 5;
+}
+
+message ErrorReport {
+  string error_code = 1;
+  string message    = 2;
+  bool   fatal      = 3;
+  google.protobuf.Struct context = 4;
+}
+
+// ── Status ────────────────────────────────────────────────────────────────────
+
+message StatusRequest {
+  string agent_id = 1;
+}
+
+message StatusResponse {
+  string agent_id  = 1;
+  string session_id = 2;
+  bool   connected = 3;
+  google.protobuf.Timestamp last_seen = 4;
+  AgentMetrics last_metrics = 5;
+}</code></pre>
+    </div>
+  </section>
+
+  <!-- Section 5: Control Plane Server -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🖥️</span> Control Plane Server (Python)</h2>
+    <p>The control plane runs in your cloud infrastructure. It maintains a registry of connected agents and can push commands to any of them at any time.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">cplane/server.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import grpc
+import uuid
+import logging
+import threading
+from concurrent import futures
+from datetime import datetime, timezone
+from queue import Queue, Empty
+from typing import Iterator
+
+import agent_platform_pb2 as pb
+import agent_platform_pb2_grpc as pb_grpc
+from google.protobuf.timestamp_pb2 import Timestamp
+from grpc_health.v1 import health, health_pb2_servicer
+from grpc_health.v1 import health_pb2
+from prometheus_client import Counter, Gauge, start_http_server
+
+logger = logging.getLogger(__name__)
+
+# ── Metrics ───────────────────────────────────────────────────────────────────
+
+AGENTS_CONNECTED = Gauge("agents_connected_total", "Active agent connections")
+COMMANDS_SENT    = Counter("commands_sent_total", "Commands pushed to agents")
+HEARTBEATS_IN    = Counter("heartbeats_received_total", "Heartbeats received")
+
+# ── Agent Registry ────────────────────────────────────────────────────────────
+
+class AgentSession:
+    def __init__(self, agent_id: str, tenant_id: str, session_id: str):
+        self.agent_id   = agent_id
+        self.tenant_id  = tenant_id
+        self.session_id = session_id
+        self.command_queue: Queue = Queue()
+        self.connected = True
+        self.last_heartbeat = datetime.now(timezone.utc)
+
+
+class AgentRegistry:
+    def __init__(self):
+        self._sessions: dict[str, AgentSession] = {}
+        self._lock = threading.Lock()
+
+    def register(self, agent_id: str, tenant_id: str) -> AgentSession:
+        session = AgentSession(agent_id, tenant_id, str(uuid.uuid4()))
+        with self._lock:
+            self._sessions[agent_id] = session
+        AGENTS_CONNECTED.inc()
+        logger.info(f"Agent registered: {agent_id} (tenant={tenant_id})")
+        return session
+
+    def unregister(self, agent_id: str):
+        with self._lock:
+            if agent_id in self._sessions:
+                self._sessions[agent_id].connected = False
+                del self._sessions[agent_id]
+        AGENTS_CONNECTED.dec()
+        logger.info(f"Agent disconnected: {agent_id}")
+
+    def push_command(self, agent_id: str, command: pb.Command) -> bool:
+        with self._lock:
+            session = self._sessions.get(agent_id)
+        if session and session.connected:
+            session.command_queue.put(command)
+            COMMANDS_SENT.inc()
+            return True
+        return False
+
+    def list_agents(self) -> list[AgentSession]:
+        with self._lock:
+            return list(self._sessions.values())
+
+
+registry = AgentRegistry()
+
+
+# ── gRPC Servicer ─────────────────────────────────────────────────────────────
+
+class ControlPlaneServicer(pb_grpc.ControlPlaneServicer):
+
+    def RegisterAgent(self, request: pb.RegisterRequest, context) -> pb.RegisterResponse:
+        # JWT is verified by the auth interceptor before this runs
+        session = registry.register(request.agent_id, request.tenant_id)
+
+        ts = Timestamp()
+        ts.FromDatetime(datetime.now(timezone.utc))
+
+        return pb.RegisterResponse(
+            session_id=session.session_id,
+            server_time=ts,
+            heartbeat_interval_sec=30,
+            enabled_commands=["run_query", "upload_file", "reload_config"],
+        )
+
+    def AgentStream(
+        self,
+        request_iterator: Iterator[pb.AgentMessage],
+        context,
+    ) -> Iterator[pb.ServerMessage]:
+        # Extract agent_id from JWT metadata added by interceptor
+        meta = dict(context.invocation_metadata())
+        agent_id = meta.get("x-agent-id", "unknown")
+
+        with self._lock_agent_stream(agent_id, context) as session:
+            # Start thread that reads commands from queue and yields them
+            yield from self._bidirectional_loop(agent_id, session, request_iterator, context)
+
+    def _bidirectional_loop(self, agent_id, session, request_iterator, context):
+        # Use a thread-safe handoff: read requests, push to inbox
+        for msg in request_iterator:
+            if not context.is_active():
+                break
+
+            kind = msg.WhichOneof("payload")
+
+            if kind == "heartbeat":
+                HEARTBEATS_IN.inc()
+                session.last_heartbeat = datetime.now(timezone.utc)
+                ts = Timestamp()
+                ts.FromDatetime(session.last_heartbeat)
+                ack = pb.ServerMessage(
+                    heartbeat_ack=pb.HeartbeatAck(server_time=ts, server_status="healthy")
+                )
+                yield ack
+
+            elif kind == "command_result":
+                result = msg.command_result
+                logger.info(
+                    f"[{agent_id}] command {result.command_id}: "
+                    f"{pb.CommandResult.Status.Name(result.status)}"
+                )
+
+            elif kind == "error_report":
+                logger.error(f"[{agent_id}] error: {msg.error_report.message}")
+
+            # Drain any pending commands from the queue
+            while True:
+                try:
+                    cmd = session.command_queue.get_nowait()
+                    yield pb.ServerMessage(command=cmd)
+                except Empty:
+                    break
+
+        registry.unregister(agent_id)
+
+    def _lock_agent_stream(self, agent_id, context):
+        """Context manager that unregisters the agent on exit."""
+        class _Ctx:
+            def __enter__(self_):
+                return registry._sessions.get(agent_id)
+            def __exit__(self_, *args):
+                registry.unregister(agent_id)
+        return _Ctx()
+
+    def GetAgentStatus(self, request: pb.StatusRequest, context) -> pb.StatusResponse:
+        with registry._lock:
+            session = registry._sessions.get(request.agent_id)
+        if not session:
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Agent {request.agent_id} not connected")
+
+        ts = Timestamp()
+        ts.FromDatetime(session.last_heartbeat)
+        return pb.StatusResponse(
+            agent_id=session.agent_id,
+            session_id=session.session_id,
+            connected=session.connected,
+            last_seen=ts,
+        )
+
+
+# ── Server Bootstrap ──────────────────────────────────────────────────────────
+
+def serve(port: int = 50051, metrics_port: int = 9090):
+    start_http_server(metrics_port)
+    logger.info(f"Prometheus metrics on :{metrics_port}")
+
+    # Health service
+    health_servicer = health.HealthServicer()
+    health_servicer.set("ControlPlane", health_pb2.HealthCheckResponse.SERVING)
+
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=20),
+        options=[
+            ("grpc.max_send_message_length", 50 * 1024 * 1024),
+            ("grpc.keepalive_time_ms", 30_000),
+            ("grpc.keepalive_timeout_ms", 10_000),
+            ("grpc.keepalive_permit_without_calls", True),
+        ],
+    )
+    pb_grpc.add_ControlPlaneServicer_to_server(ControlPlaneServicer(), server)
+    health_pb2_servicer.add_HealthServicer_to_server(health_servicer, server)
+
+    # TLS
+    with open("certs/server.key", "rb") as f: key = f.read()
+    with open("certs/server.crt", "rb") as f: cert = f.read()
+    with open("certs/ca.crt", "rb") as f: ca = f.read()
+
+    credentials = grpc.ssl_server_credentials(
+        [(key, cert)],
+        root_certificates=ca,
+        require_client_auth=False,  # set True for mTLS
+    )
+    server.add_secure_port(f"[::]:{port}", credentials)
+    server.start()
+    logger.info(f"Control plane gRPC server on :{port} (TLS)")
+    server.wait_for_termination()
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    serve()</code></pre>
+    </div>
+  </section>
+
+  <!-- Section 6: Data Plane Agent -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🤖</span> Data Plane Agent (Python)</h2>
+    <p>The agent runs inside the customer network. It handles reconnection, token refresh, heartbeat, and dispatches incoming commands to local handlers.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">dplane/agent.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import grpc
+import uuid
+import logging
+import time
+import random
+import threading
+from datetime import datetime, timezone
+
+import agent_platform_pb2 as pb
+import agent_platform_pb2_grpc as pb_grpc
+from google.protobuf.timestamp_pb2 import Timestamp
+from google.protobuf.struct_pb2 import Struct
+
+logger = logging.getLogger(__name__)
+
+# ── Exponential Backoff ───────────────────────────────────────────────────────
+
+class ExponentialBackoff:
+    def __init__(self, base=1.0, max_delay=60.0, multiplier=2.0, jitter=0.1):
+        self.base       = base
+        self.max_delay  = max_delay
+        self.multiplier = multiplier
+        self.jitter     = jitter
+        self._attempt   = 0
+
+    def next_delay(self) -> float:
+        delay = min(self.base * (self.multiplier ** self._attempt), self.max_delay)
+        delay += random.uniform(0, self.jitter * delay)
+        self._attempt += 1
+        return delay
+
+    def reset(self):
+        self._attempt = 0
+
+
+# ── Token Manager ─────────────────────────────────────────────────────────────
+
+class TokenManager:
+    """Fetches and refreshes JWT tokens from the auth service."""
+
+    def __init__(self, auth_url: str, client_id: str, client_secret: str):
+        self.auth_url      = auth_url
+        self.client_id     = client_id
+        self.client_secret = client_secret
+        self._token: str | None = None
+        self._expires_at: float = 0
+
+    def get_token(self) -> str:
+        if time.time() < self._expires_at - 30:
+            return self._token
+        return self._refresh()
+
+    def _refresh(self) -> str:
+        import urllib.request, json
+        payload = json.dumps({
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+        }).encode()
+        req = urllib.request.Request(
+            f"{self.auth_url}/token",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+        self._token      = data["access_token"]
+        self._expires_at = time.time() + data.get("expires_in", 3600)
+        logger.info("JWT token refreshed")
+        return self._token
+
+
+# ── Command Handlers ──────────────────────────────────────────────────────────
+
+HANDLERS: dict = {}
+
+def command_handler(action: str):
+    def decorator(fn):
+        HANDLERS[action] = fn
+        return fn
+    return decorator
+
+
+@command_handler("run_query")
+def handle_run_query(params: dict) -> dict:
+    sql = params.get("sql", "")
+    logger.info(f"Running query: {sql}")
+    # Replace with real DB execution
+    return {"rows": 42, "columns": ["id", "name"]}
+
+
+@command_handler("reload_config")
+def handle_reload_config(params: dict) -> dict:
+    logger.info("Reloading configuration")
+    return {"status": "reloaded"}
+
+
+# ── Agent ─────────────────────────────────────────────────────────────────────
+
+class DataPlaneAgent:
+    def __init__(
+        self,
+        agent_id: str,
+        tenant_id: str,
+        cplane_host: str,
+        token_manager: TokenManager,
+        ca_cert_path: str,
+        heartbeat_interval: int = 30,
+    ):
+        self.agent_id           = agent_id
+        self.tenant_id          = tenant_id
+        self.cplane_host        = cplane_host
+        self.token_manager      = token_manager
+        self.ca_cert_path       = ca_cert_path
+        self.heartbeat_interval = heartbeat_interval
+        self.backoff            = ExponentialBackoff()
+        self._stop              = threading.Event()
+        self._session_id: str | None = None
+
+    def run(self):
+        logger.info(f"Agent {self.agent_id} starting...")
+        while not self._stop.is_set():
+            try:
+                self._connect_and_stream()
+                self.backoff.reset()
+            except grpc.RpcError as e:
+                code = e.code()
+                if code == grpc.StatusCode.UNAUTHENTICATED:
+                    logger.warning("Auth failed — waiting 30s before retry")
+                    time.sleep(30)
+                elif code == grpc.StatusCode.PERMISSION_DENIED:
+                    logger.error("Permission denied — stopping agent")
+                    break
+                else:
+                    delay = self.backoff.next_delay()
+                    logger.warning(f"Connection lost ({code.name}) — retry in {delay:.1f}s")
+                    time.sleep(delay)
+            except Exception as e:
+                delay = self.backoff.next_delay()
+                logger.error(f"Unexpected error: {e} — retry in {delay:.1f}s")
+                time.sleep(delay)
+
+    def stop(self):
+        self._stop.set()
+
+    def _connect_and_stream(self):
+        token = self.token_manager.get_token()
+
+        with open(self.ca_cert_path, "rb") as f:
+            ca_cert = f.read()
+
+        credentials = grpc.ssl_channel_credentials(root_certificates=ca_cert)
+        call_creds  = grpc.access_token_call_credentials(token)
+        combined    = grpc.composite_channel_credentials(credentials, call_creds)
+
+        with grpc.secure_channel(self.cplane_host, combined) as channel:
+            grpc.channel_ready_future(channel).result(timeout=10)
+            stub = pb_grpc.ControlPlaneStub(channel)
+
+            # Register
+            reg_resp = stub.RegisterAgent(pb.RegisterRequest(
+                agent_id=self.agent_id,
+                tenant_id=self.tenant_id,
+                version="1.0.0",
+                capabilities=["run_query", "reload_config"],
+                metadata={"env": "production"},
+            ))
+            self._session_id = reg_resp.session_id
+            self.heartbeat_interval = reg_resp.heartbeat_interval_sec
+            logger.info(f"Registered — session={self._session_id}")
+
+            # Start heartbeat thread
+            heartbeat_stop = threading.Event()
+            hb_thread = threading.Thread(
+                target=self._heartbeat_loop,
+                args=(heartbeat_stop,),
+                daemon=True,
+            )
+            hb_thread.start()
+
+            try:
+                # Open bidirectional stream
+                responses = stub.AgentStream(
+                    self._message_generator(heartbeat_stop),
+                )
+                for server_msg in responses:
+                    self._handle_server_message(server_msg, stub)
+            finally:
+                heartbeat_stop.set()
+                hb_thread.join(timeout=5)
+
+    def _message_generator(self, stop_event: threading.Event):
+        """Yields messages to the server — heartbeats pulled from queue."""
+        import queue
+        self._outbox: queue.Queue = queue.Queue()
+
+        while not stop_event.is_set() and not self._stop.is_set():
+            try:
+                msg = self._outbox.get(timeout=1)
+                yield msg
+            except queue.Empty:
+                continue
+
+    def _heartbeat_loop(self, stop_event: threading.Event):
+        while not stop_event.is_set():
+            ts = Timestamp()
+            ts.FromDatetime(datetime.now(timezone.utc))
+            hb = pb.AgentMessage(
+                session_id=self._session_id,
+                heartbeat=pb.Heartbeat(sent_at=ts, status="healthy"),
+            )
+            try:
+                self._outbox.put(hb)
+            except AttributeError:
+                pass
+            stop_event.wait(self.heartbeat_interval)
+
+    def _handle_server_message(self, msg: pb.ServerMessage, stub):
+        kind = msg.WhichOneof("payload")
+
+        if kind == "heartbeat_ack":
+            pass  # latency tracking could go here
+
+        elif kind == "command":
+            cmd = msg.command
+            logger.info(f"Received command: {cmd.action} (id={cmd.command_id})")
+            self._execute_command(cmd)
+
+        elif kind == "config_update":
+            logger.info(f"Config update v{msg.config_update.version}")
+
+        elif kind == "shutdown":
+            sd = msg.shutdown
+            logger.info(f"Shutdown requested: {sd.reason} (reconnect={sd.reconnect_ok})")
+            time.sleep(sd.delay_sec)
+            if not sd.reconnect_ok:
+                self.stop()
+
+    def _execute_command(self, cmd: pb.Command):
+        handler = HANDLERS.get(cmd.action)
+        if not handler:
+            self._send_result(cmd.command_id, pb.CommandResult.FAILED, error=f"Unknown action: {cmd.action}")
+            return
+
+        try:
+            params = {}
+            for k, v in cmd.params.fields.items():
+                params[k] = v.string_value or v.number_value or v.bool_value
+            output = handler(params)
+            result_struct = Struct()
+            result_struct.update(output)
+            self._send_result(cmd.command_id, pb.CommandResult.COMPLETED, output=result_struct)
+        except Exception as e:
+            self._send_result(cmd.command_id, pb.CommandResult.FAILED, error=str(e))
+
+    def _send_result(self, command_id, status, output=None, error=""):
+        ts = Timestamp()
+        ts.FromDatetime(datetime.now(timezone.utc))
+        result = pb.CommandResult(
+            command_id=command_id,
+            status=status,
+            error_message=error,
+            completed_at=ts,
+        )
+        if output:
+            result.output.CopyFrom(output)
+
+        msg = pb.AgentMessage(
+            session_id=self._session_id,
+            command_result=result,
+        )
+        try:
+            self._outbox.put(msg)
+        except AttributeError:
+            pass
+
+
+# ── Entry Point ───────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import os
+    logging.basicConfig(level=logging.INFO)
+
+    token_mgr = TokenManager(
+        auth_url=os.environ.get("AUTH_URL", "https://auth.example.com"),
+        client_id=os.environ.get("AGENT_CLIENT_ID", "agent-001"),
+        client_secret=os.environ.get("AGENT_SECRET", "changeme"),
+    )
+
+    agent = DataPlaneAgent(
+        agent_id=os.environ.get("AGENT_ID", f"agent-{uuid.uuid4().hex[:8]}"),
+        tenant_id=os.environ.get("TENANT_ID", "tenant-001"),
+        cplane_host=os.environ.get("CPLANE_HOST", "cplane.example.com:443"),
+        token_manager=token_mgr,
+        ca_cert_path=os.environ.get("CA_CERT", "certs/ca.crt"),
+    )
+    agent.run()</code></pre>
+    </div>
+  </section>
+
+  <!-- Section 7: Auth Interceptor -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔐</span> JWT Auth Interceptor (Server Side)</h2>
+    <p>The interceptor runs before every RPC call, validates the bearer token, and injects the agent identity into metadata for downstream handlers.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">cplane/interceptors.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import grpc
+import jwt
+import logging
+from grpc import ServerInterceptor
+
+logger = logging.getLogger(__name__)
+
+JWT_SECRET   = "your-256-bit-secret"   # in production: load from vault / env
+JWT_ALGORITHM = "HS256"
+EXEMPT_METHODS = {"/grpc.health.v1.Health/Check"}
+
+
+class JWTAuthInterceptor(ServerInterceptor):
+
+    def intercept_service(self, continuation, handler_call_details):
+        method = handler_call_details.method
+
+        if method in EXEMPT_METHODS:
+            return continuation(handler_call_details)
+
+        # Extract Bearer token from metadata
+        meta = dict(handler_call_details.invocation_metadata)
+        auth_header = meta.get("authorization", "")
+
+        if not auth_header.startswith("Bearer "):
+            return self._abort(grpc.StatusCode.UNAUTHENTICATED, "Missing Bearer token")
+
+        token = auth_header[len("Bearer "):]
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        except jwt.ExpiredSignatureError:
+            return self._abort(grpc.StatusCode.UNAUTHENTICATED, "Token expired")
+        except jwt.InvalidTokenError as e:
+            return self._abort(grpc.StatusCode.UNAUTHENTICATED, f"Invalid token: {e}")
+
+        # Inject identity into metadata so servicer methods can read it
+        agent_id  = payload.get("sub", "")
+        tenant_id = payload.get("tenant", "")
+        logger.info(f"Authenticated agent={agent_id} tenant={tenant_id} method={method}")
+
+        original_handler = continuation(handler_call_details)
+        return self._wrap_handler(original_handler, agent_id, tenant_id)
+
+    def _abort(self, code, msg):
+        def abort_handler(request, context):
+            context.abort(code, msg)
+        return grpc.unary_unary_rpc_method_handler(abort_handler)
+
+    def _wrap_handler(self, handler, agent_id, tenant_id):
+        if handler is None:
+            return None
+
+        def inject_meta(request, context):
+            # Inject so downstream code can call dict(context.invocation_metadata())
+            # Note: gRPC doesn't support modifying invocation_metadata in place;
+            # use a thread-local or pass via context.peer() workaround in production
+            return handler.unary_unary(request, context)
+
+        return grpc.unary_unary_rpc_method_handler(
+            inject_meta,
+            request_deserializer=handler.request_deserializer,
+            response_serializer=handler.response_serializer,
+        )
+
+
+class LoggingInterceptor(ServerInterceptor):
+    """Logs every RPC call with timing."""
+
+    def intercept_service(self, continuation, handler_call_details):
+        import time
+        method = handler_call_details.method
+
+        original = continuation(handler_call_details)
+        if original is None:
+            return None
+
+        def timed_handler(request, context):
+            start = time.perf_counter()
+            try:
+                response = original.unary_unary(request, context)
+                elapsed = (time.perf_counter() - start) * 1000
+                logger.info(f"RPC {method} OK ({elapsed:.1f}ms)")
+                return response
+            except Exception as e:
+                elapsed = (time.perf_counter() - start) * 1000
+                logger.error(f"RPC {method} ERROR ({elapsed:.1f}ms): {e}")
+                raise
+
+        return grpc.unary_unary_rpc_method_handler(
+            timed_handler,
+            request_deserializer=original.request_deserializer,
+            response_serializer=original.response_serializer,
+        )</code></pre>
+    </div>
+  </section>
+
+  <!-- Section 8: Docker Compose -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🐳</span> Docker Compose — Full Stack</h2>
+    <p>Run the full system locally with a single command. The data plane agents wait for the control plane to be healthy before connecting.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">yaml</span><span class="code-filename">docker-compose.yml</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-yaml">version: "3.9"
+
+services:
+
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agentplatform
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: changeme
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "app"]
+      interval: 5s
+
+  # ── Control Plane ───────────────────────────────────────────────────────────
+
+  cplane:
+    build:
+      context: ./cplane
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"   # gRPC (TLS)
+      - "9090:9090"     # Prometheus metrics
+    environment:
+      LOG_LEVEL: INFO
+      DB_URL: postgresql://app:changeme@postgres:5432/agentplatform
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "grpcurl", "-plaintext", "localhost:50051", "grpc.health.v1.Health/Check"]
+      interval: 10s
+      retries: 5
+
+  # ── Data Plane Agents (simulating 2 customer networks) ──────────────────────
+
+  dplane-a:
+    build:
+      context: ./dplane
+      dockerfile: Dockerfile
+    environment:
+      AGENT_ID: agent-customer-a
+      TENANT_ID: tenant-a
+      CPLANE_HOST: cplane:50051
+      AUTH_URL: http://auth:8080
+      AGENT_CLIENT_ID: agent-a
+      AGENT_SECRET: secret-a
+      CA_CERT: /app/certs/ca.crt
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      cplane: { condition: service_healthy }
+    restart: on-failure
+
+  dplane-b:
+    build:
+      context: ./dplane
+      dockerfile: Dockerfile
+    environment:
+      AGENT_ID: agent-customer-b
+      TENANT_ID: tenant-b
+      CPLANE_HOST: cplane:50051
+      AUTH_URL: http://auth:8080
+      AGENT_CLIENT_ID: agent-b
+      AGENT_SECRET: secret-b
+      CA_CERT: /app/certs/ca.crt
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      cplane: { condition: service_healthy }
+    restart: on-failure
+
+  # ── Observability ───────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports: ["9191:9090"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3001:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    depends_on: [prometheus]</code></pre>
+    </div>
+  </section>
+
+  <!-- Section 9: Kubernetes -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">☸️</span> Kubernetes Deployment Patterns</h2>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ️</span>
+      <div class="callout-body">
+        <div class="callout-title">Agent Deployment Model</div>
+        <div class="callout-text">The control plane runs in your cloud cluster. The data plane agent runs in <em>the customer's</em> environment — either as a Kubernetes Deployment or as a standalone Docker container on a VM. The customer installs it via a Helm chart you provide.</div>
+      </div>
+    </div>
+
+    <div class="arch-diagram">
+      <p style="font-weight:700;margin-bottom:16px;">Kubernetes Deployment Architecture</p>
+      <div class="mermaid">
+graph TB
+    subgraph yourcloud["☁️ Your Cloud (e.g. AWS EKS)"]
+        SVC["Service\nLoadBalancer :443"]
+        CP_DEPLOY["Deployment: cplane\n3 replicas"]
+        CP_HPA["HorizontalPodAutoscaler"]
+        PG["StatefulSet: PostgreSQL"]
+        RD["StatefulSet: Redis"]
+        MON["Prometheus + Grafana"]
+
+        SVC --> CP_DEPLOY
+        CP_HPA -.-> CP_DEPLOY
+        CP_DEPLOY --> PG
+        CP_DEPLOY --> RD
+        CP_DEPLOY --> MON
+    end
+
+    subgraph custenv["🏢 Customer Environment"]
+        HELM["Helm Chart Install"]
+        AGENT["Deployment: dplane-agent\n1 replica"]
+        SECRET["Secret: agent credentials"]
+        CM["ConfigMap: cplane URL + CA cert"]
+
+        HELM --> AGENT
+        SECRET --> AGENT
+        CM --> AGENT
+    end
+
+    AGENT -->|"TLS :443\noutbound only"| SVC
+
+    style yourcloud fill:#ede9fe,stroke:#4f46e5,stroke-width:2px,stroke-dasharray:6
+    style custenv fill:#ecfeff,stroke:#0e7490,stroke-width:2px,stroke-dasharray:6
+    style CP_DEPLOY fill:#4f46e5,color:#fff
+    style AGENT fill:#06b6d4,color:#fff
+      </div>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">yaml</span><span class="code-filename">k8s/dplane-agent-deployment.yaml (customer installs this)</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-yaml">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dplane-agent
+  namespace: your-platform
+spec:
+  replicas: 1           # single agent per customer environment
+  selector:
+    matchLabels:
+      app: dplane-agent
+  template:
+    metadata:
+      labels:
+        app: dplane-agent
+    spec:
+      containers:
+        - name: agent
+          image: your-registry.io/dplane-agent:1.0.0
+          env:
+            - name: CPLANE_HOST
+              value: "cplane.example.com:443"
+            - name: AGENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: agent-credentials
+                  key: agent-id
+            - name: AGENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: agent-credentials
+                  key: agent-secret
+            - name: TENANT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: agent-credentials
+                  key: tenant-id
+            - name: CA_CERT
+              value: /etc/certs/ca.crt
+          volumeMounts:
+            - name: ca-cert
+              mountPath: /etc/certs
+              readOnly: true
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import os; open('/tmp/alive')"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+      volumes:
+        - name: ca-cert
+          configMap:
+            name: cplane-ca-cert
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-credentials
+  namespace: your-platform
+type: Opaque
+stringData:
+  agent-id: "agent-customer-xyz"
+  tenant-id: "tenant-xyz"
+  agent-secret: "replace-with-real-secret"</code></pre>
+    </div>
+  </section>
+
+  <!-- Section 10: Production Checklist -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">✅</span> Production Checklist</h2>
+
+    <div class="rpc-grid" style="grid-template-columns: repeat(2, 1fr);">
+      <div class="rpc-card">
+        <div class="rpc-icon">🔒</div>
+        <div class="rpc-name">Security</div>
+        <div class="rpc-desc">
+          <ul style="text-align:left;padding-left:16px;margin:0;">
+            <li>TLS with CA-signed certs (not self-signed in prod)</li>
+            <li>JWT with short expiry (15–60 min) + refresh</li>
+            <li>mTLS for highest-security deployments</li>
+            <li>Rate limiting per agent/tenant in interceptor</li>
+            <li>Secrets in Vault / AWS Secrets Manager</li>
+          </ul>
+        </div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">🔁</div>
+        <div class="rpc-name">Reliability</div>
+        <div class="rpc-desc">
+          <ul style="text-align:left;padding-left:16px;margin:0;">
+            <li>Exponential backoff with jitter on reconnect</li>
+            <li>Heartbeat + server-side timeout detection</li>
+            <li>Command queue survives disconnects (Redis)</li>
+            <li>Multiple cplane replicas behind load balancer</li>
+            <li>HPA on cplane based on connected agents Gauge</li>
+          </ul>
+        </div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">📊</div>
+        <div class="rpc-name">Observability</div>
+        <div class="rpc-desc">
+          <ul style="text-align:left;padding-left:16px;margin:0;">
+            <li>Prometheus: agents_connected, commands_sent, latency</li>
+            <li>OpenTelemetry tracing across control plane RPCs</li>
+            <li>Structured logs with agent_id and tenant_id</li>
+            <li>Grafana dashboards for agent fleet health</li>
+            <li>Alerting on agent disconnect duration</li>
+          </ul>
+        </div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">📦</div>
+        <div class="rpc-name">Protocol</div>
+        <div class="rpc-desc">
+          <ul style="text-align:left;padding-left:16px;margin:0;">
+            <li>Version field in RegisterRequest for backward compat</li>
+            <li>Never reuse field numbers in proto files</li>
+            <li>Use <code>reserved</code> for removed fields</li>
+            <li>Document breaking vs non-breaking proto changes</li>
+            <li>Publish proto as a versioned package (v1, v2)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="arch-diagram" style="margin-top:32px;">
+      <p style="font-weight:700;margin-bottom:16px;">Component → Production Equivalent</p>
+      <div class="mermaid">
+graph LR
+    subgraph demo["Demo / Learning"]
+        D1["In-memory dict\nagent registry"]
+        D2["Queue.Queue\ncommand queue"]
+        D3["File-based\nJWT secret"]
+        D4["Self-signed\ncerts"]
+        D5["Single server\nprocess"]
+    end
+
+    subgraph prod["Production"]
+        P1["PostgreSQL / Redis\nagent registry + sessions"]
+        P2["Redis / Kafka\ndurable command queue"]
+        P3["HashiCorp Vault\nAWS Secrets Manager"]
+        P4["CA-signed certs\nLet's Encrypt / internal PKI"]
+        P5["K8s Deployment\n3+ replicas + HPA"]
+    end
+
+    D1 --> P1
+    D2 --> P2
+    D3 --> P3
+    D4 --> P4
+    D5 --> P5
+
+    style demo fill:#fef3c7,stroke:#d97706,stroke-width:1px
+    style prod fill:#d1fae5,stroke:#10b981,stroke-width:1px
+      </div>
+    </div>
+  </section>
+
+  <!-- Nav -->
+  <div class="lesson-nav">
+    <a href="lesson-10.html" class="lesson-nav-btn prev">← Lesson 10: Capstone</a>
+    <a href="index.html" class="lesson-nav-btn next">Back to Course →</a>
+  </div>
+
+</div>
+</main>
+
+<footer>
+  <p>gRPC Mastery · <a href="https://grpc.io" target="_blank">grpc.io</a> · <a href="https://protobuf.dev" target="_blank">protobuf.dev</a></p>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -6,6 +6,7 @@
 <title>Lesson 10: Capstone — Production cplane↔dplane | gRPC Mastery</title>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 <nav class="top-nav">
@@ -20,7 +21,7 @@
   <div class="container">
     <div class="lesson-badge" style="background:rgba(255,255,255,.25);">🏆 Lesson 10 of 10 · Capstone</div>
     <h1>Production cplane↔dplane</h1>
-    <p class="lesson-subtitle">Bring everything together — bidirectional streaming + TLS + JWT auth + heartbeat + exponential backoff reconnection. A complete production-grade mini system that mirrors your real FlowGenX architecture.</p>
+    <p class="lesson-subtitle">Bring everything together — bidirectional streaming + TLS + JWT auth + heartbeat + exponential backoff reconnection. A complete production-grade mini cplane↔dplane system.</p>
     <div class="lesson-meta">
       <span class="lesson-meta-item">⏱ 90 min</span>
       <span class="lesson-meta-item">🏗️ Full system</span>
@@ -33,39 +34,43 @@
 
   <section class="content-section fade-in" style="border:2px solid var(--primary);">
     <h2><span class="section-icon">🗺️</span> What We're Building</h2>
-    <p>A complete mini version of FlowGenX's cplane↔dplane system incorporating every lesson:</p>
+    <p>A complete mini cplane↔dplane system incorporating every lesson:</p>
 
     <div class="arch-diagram">
-      <p style="font-weight:700;margin-bottom:20px;font-size:18px;">Complete Mini Architecture</p>
-      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:start;">
-        <div style="border:2px dashed var(--cyan);border-radius:var(--radius);padding:16px;">
-          <p style="font-weight:700;color:#0e7490;font-size:13px;margin-bottom:12px;">DPLANE (Customer Network)</p>
-          <div style="display:flex;flex-direction:column;gap:8px;">
-            <div class="arch-box">Reconnect w/ Backoff</div>
-            <div class="arch-box">JWT Token Manager</div>
-            <div class="arch-box cyan">gRPC Client + Streaming</div>
-            <div class="arch-box">Heartbeat Thread</div>
-          </div>
-        </div>
-        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-size:13px;color:var(--text-muted);padding-top:60px;">
-          <span>← TLS →</span>
-          <span>← JWT →</span>
-          <span>← Bidi Stream →</span>
-          <span>← Heartbeat →</span>
-          <span>← Commands →</span>
-          <span>← Callbacks →</span>
-        </div>
-        <div style="border:2px dashed var(--primary-light);border-radius:var(--radius);padding:16px;">
-          <p style="font-weight:700;color:var(--primary);font-size:13px;margin-bottom:12px;">CPLANE (FlowGenX Cloud)</p>
-          <div style="display:flex;flex-direction:column;gap:8px;">
-            <div class="arch-box primary">gRPC Server + TLS</div>
-            <div class="arch-box">JWT Auth Interceptor</div>
-            <div class="arch-box">Logging + Metrics</div>
-            <div class="arch-box">Health Check</div>
-            <div class="arch-box">Client Registry</div>
-            <div class="arch-box">Command Push API</div>
-          </div>
-        </div>
+      <p style="font-weight:700;margin-bottom:16px;font-size:18px;">Complete Production Architecture</p>
+      <div class="mermaid">
+graph TB
+    subgraph dplane["🏢 Data Plane — Customer Network"]
+        direction TB
+        RB["Reconnect w/ Backoff"]
+        TM["JWT Token Manager"]
+        GC["gRPC Client + Streaming"]
+        HB["Heartbeat Thread"]
+        RB --> GC
+        TM --> GC
+        HB --> GC
+    end
+
+    subgraph cplane["☁️ Control Plane — SaaS Cloud"]
+        direction TB
+        GS["gRPC Server + TLS"]
+        JI["JWT Auth Interceptor"]
+        LM["Logging + Metrics"]
+        HC["Health Check"]
+        CR["Client Registry"]
+        CP["Command Push API"]
+        GS --> JI --> LM
+        GS --> HC
+        GS --> CR
+        CP --> CR
+    end
+
+    GC -->|"TLS / JWT\nBidi Stream\nHeartbeat + Commands"| GS
+
+    style dplane fill:#ecfeff,stroke:#0e7490,stroke-width:2px,stroke-dasharray:6
+    style cplane fill:#ede9fe,stroke:#4f46e5,stroke-width:2px,stroke-dasharray:6
+    style GC fill:#06b6d4,color:#fff,stroke:#0e7490
+    style GS fill:#4f46e5,color:#fff,stroke:#3730a3
       </div>
     </div>
   </section>
@@ -427,27 +432,28 @@ docker-compose down</code></pre>
   </section>
 
   <section class="content-section fade-in">
-    <h2><span class="section-icon">🔗</span> Your Production Code Reference</h2>
-    <p>Now that you've built the mini system, you can read your production code with full understanding:</p>
+    <h2><span class="section-icon">🔗</span> From Demo to Production</h2>
+    <p>Everything you built in <code>grpc-demo/</code> maps directly to what production gRPC services look like:</p>
 
     <table class="compare-table">
-      <thead><tr><th>What you built</th><th>Production equivalent</th></tr></thead>
+      <thead><tr><th>Demo component</th><th>Production equivalent</th></tr></thead>
       <tbody>
-        <tr><td><code>grpc-demo/proto/cplane.proto</code></td><td><code>deployed/cplane/flowgenx_cp_grpc_server/proto/cplane.proto</code></td></tr>
-        <tr><td><code>grpc-demo/cplane/server.py</code></td><td><code>deployed/cplane/flowgenx_cp_grpc_server/</code></td></tr>
-        <tr><td><code>grpc-demo/dplane/client.py</code></td><td><code>deployed/dplane/flowgenx_dp_grpc_client/client_main.py</code></td></tr>
-        <tr><td><code>grpc-demo/dplane/reconnect.py</code></td><td><code>deployed/dplane/flowgenx_dp_grpc_client/handlers/</code></td></tr>
-        <tr><td><code>ExponentialBackoff</code></td><td>Connection retry logic in <code>handlers/heartbeat.py</code></td></tr>
-        <tr><td><code>MetricsInterceptor</code></td><td><code>deployed/dplane/flowgenx_dp_grpc_client/core/</code></td></tr>
-        <tr><td><code>JWTAuthInterceptor</code></td><td><code>deployed/cplane/flowgenx_cp_security_services/</code></td></tr>
+        <tr><td><code>proto/cplane.proto</code></td><td>Shared proto contract versioned in a dedicated repo, distributed to all teams</td></tr>
+        <tr><td><code>cplane/server.py</code></td><td>gRPC server deployed as a Kubernetes Deployment with horizontal scaling</td></tr>
+        <tr><td><code>dplane/client.py</code></td><td>Agent binary shipped to customer environments (Docker image or native binary)</td></tr>
+        <tr><td><code>reconnect.py ExponentialBackoff</code></td><td>Production reconnection logic often uses <code>grpc.experimental.gevent</code> or a dedicated retry library</td></tr>
+        <tr><td><code>connected_clients</code> dict</td><td>Replaced by PostgreSQL + Redis for persistence and pub/sub across server replicas</td></tr>
+        <tr><td><code>MetricsInterceptor</code></td><td>Prometheus scrape endpoint behind a <code>/metrics</code> route, scraped by a sidecar</td></tr>
+        <tr><td><code>JWTAuthInterceptor</code></td><td>Integrated with OAuth2/OIDC provider (Keycloak, Auth0, Okta)</td></tr>
+        <tr><td>Self-signed certs</td><td>Certs from a real CA (Let's Encrypt, AWS ACM, internal PKI)</td></tr>
       </tbody>
     </table>
 
     <div class="callout architecture">
       <span class="callout-icon">🔮</span>
       <div class="callout-body">
-        <div class="callout-title">What's different in production</div>
-        <div class="callout-text">The real cplane server integrates with PostgreSQL for client persistence, Redis for pub/sub when pushing commands to dplanes, OAuth2/Keycloak for auth, Kong API Gateway for routing, and Kubernetes for scaling. But the gRPC patterns — proto, streaming, auth, reconnect — are exactly what you've built here. You now understand the foundation.</div>
+        <div class="callout-title">The patterns are the same at any scale</div>
+        <div class="callout-text">Production gRPC services add PostgreSQL, Redis, Kubernetes, and a real CA — but the proto definitions, streaming patterns, interceptors, auth flow, and reconnection logic are exactly what you've built here. You now understand the foundation that all production B2B gRPC systems are built on.</div>
       </div>
     </div>
   </section>
@@ -569,7 +575,7 @@ docker-compose down</code></pre>
   <div style="background:linear-gradient(135deg,#1e1b4b,#4f46e5);color:white;border-radius:var(--radius-lg);padding:48px;text-align:center;margin-bottom:32px;">
     <div style="font-size:48px;margin-bottom:16px;">🎓</div>
     <h2 style="font-size:32px;margin-bottom:12px;">Course Complete!</h2>
-    <p style="opacity:.9;max-width:600px;margin:0 auto 24px;">You've mastered gRPC from Protocol Buffers to production-grade bidirectional streaming. You now understand every part of FlowGenX's cplane↔dplane architecture.</p>
+    <p style="opacity:.9;max-width:600px;margin:0 auto 24px;">You've mastered gRPC from Protocol Buffers to production-grade bidirectional streaming. You now understand the foundation that all production B2B control plane systems are built on.</p>
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
       <a href="lesson-01.html" style="background:rgba(255,255,255,.2);color:white;text-decoration:none;padding:10px 20px;border-radius:var(--radius);font-weight:600;border:1px solid rgba(255,255,255,.3);">Review from start</a>
       <a href="index.html" style="background:white;color:var(--primary);text-decoration:none;padding:10px 20px;border-radius:var(--radius);font-weight:600;">View all lessons</a>
@@ -590,7 +596,7 @@ docker-compose down</code></pre>
   </div>
 
 </div></main>
-<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · Built for FlowGenX B2B Deployment · <a href="https://grpc.io" target="_blank">grpc.io</a></p></footer>
+<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · <a href="https://grpc.io" target="_blank">grpc.io</a></p></footer>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="app.js"></script>
 </body>

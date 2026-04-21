@@ -6,6 +6,7 @@
 <title>Lesson 7: Interceptors, Metadata & Deadlines | gRPC Mastery</title>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 <nav class="top-nav">
@@ -86,7 +87,7 @@ def build_metadata(trace_id=None, auth_token=None):
       <span class="callout-icon">💡</span>
       <div class="callout-body">
         <div class="callout-title">Metadata key naming convention</div>
-        <div class="callout-text">Metadata keys are lowercase. Binary data uses keys ending in <code>-bin</code> (e.g. <code>auth-token-bin</code>), which are base64-encoded automatically. In FlowGenX's dplane client, auth tokens and trace IDs are sent as metadata on every call.</div>
+        <div class="callout-text">Metadata keys are lowercase. Binary data uses keys ending in <code>-bin</code> (e.g. <code>auth-token-bin</code>), which are base64-encoded automatically. In production data plane clients, auth tokens and trace IDs are typically sent as metadata on every call.</div>
       </div>
     </div>
   </section>

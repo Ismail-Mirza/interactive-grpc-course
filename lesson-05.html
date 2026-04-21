@@ -6,6 +6,7 @@
 <title>Lesson 5: Streaming Patterns | gRPC Mastery</title>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 <nav class="top-nav">
@@ -20,7 +21,7 @@
   <div class="container">
     <div class="lesson-badge">Lesson 5 of 10 · Intermediate</div>
     <h1>Streaming Patterns</h1>
-    <p class="lesson-subtitle">Implement all four RPC types — unary, server streaming, client streaming, and bidirectional. Build the StreamMessages RPC that keeps your dplane permanently connected to the cplane.</p>
+    <p class="lesson-subtitle">Implement all four RPC types — unary, server streaming, client streaming, and bidirectional. Build the StreamMessages RPC that keeps a data plane permanently connected to the control plane.</p>
     <div class="lesson-meta">
       <span class="lesson-meta-item">⏱ 75 min</span>
       <span class="lesson-meta-item">🌊 4 RPC types</span>
@@ -121,13 +122,13 @@ print(response.message)  # "Received 100 log entries"</code></pre>
 
   <section class="content-section fade-in">
     <h2><span class="section-icon">🔄</span> Bidirectional Streaming — The Key Pattern</h2>
-    <p>Both sides send and receive independently. This is how <code>StreamMessages</code> works in your cplane — the dplane holds a persistent connection and both sides can send at any time.</p>
+    <p>Both sides send and receive independently. This is how <code>StreamMessages</code> works in a real control plane — the data plane holds a persistent connection and both sides can send at any time.</p>
 
     <div class="callout architecture">
       <span class="callout-icon">🔮</span>
       <div class="callout-body">
-        <div class="callout-title">This IS your production StreamMessages</div>
-        <div class="callout-text">In <code>deployed/cplane/flowgenx_cp_grpc_server/</code>, the <code>StreamMessages</code> bidirectional RPC is the core connection between cplane and each dplane. The dplane sends heartbeats and callback results. The cplane sends API commands. One persistent stream handles all of it.</div>
+        <div class="callout-title">The core pattern in production B2B platforms</div>
+        <div class="callout-text">In a production B2B control plane, <code>StreamMessages</code> bidirectional RPC is the core connection between the cloud server and each customer-side agent. The data plane sends heartbeats and callback results. The control plane sends API commands. One persistent stream handles all of it.</div>
       </div>
     </div>
 
@@ -406,7 +407,7 @@ class DPlaneClient:
   </div>
   <div class="completion-banner" data-lesson="5">
     <h2>🎉 Lesson 5 Complete!</h2>
-    <p>You've implemented bidirectional streaming — the heart of your cplane↔dplane system. Next: make it robust with proper error handling.</p>
+    <p>You've implemented bidirectional streaming — the heart of any cplane↔dplane system. Next: make it robust with proper error handling.</p>
   </div>
   <div class="lesson-nav">
     <a href="lesson-04.html" class="lesson-nav-btn btn-prev">← Lesson 4: Unary RPC</a>

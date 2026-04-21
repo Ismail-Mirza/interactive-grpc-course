@@ -6,6 +6,7 @@
 <title>Lesson 2: Proto3 Foundations | gRPC Mastery</title>
 <link rel="stylesheet" href="styles.css"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 </head>
 <body>
 
@@ -49,7 +50,7 @@
       <span class="callout-icon">💡</span>
       <div class="callout-body">
         <div class="callout-title">Proto file is a contract</div>
-        <div class="callout-text">The <code>.proto</code> file is shared between both sides. In FlowGenX, <code>deployed/cplane/flowgenx_cp_grpc_server/proto/cplane.proto</code> is the contract that both the server and <code>deployed/dplane/flowgenx_dp_grpc_client/proto/</code> use. Change the proto, regenerate both sides.</div>
+        <div class="callout-text">The <code>.proto</code> file is shared between both sides. In a real system, the control plane and data plane share the same <code>cplane.proto</code> as their contract. Change the proto on either side, regenerate both, and redeploy.</div>
       </div>
     </div>
   </section>
@@ -197,8 +198,8 @@ service ControlPlane {
     <div class="callout architecture">
       <span class="callout-icon">🔮</span>
       <div class="callout-body">
-        <div class="callout-title">Your cplane.proto uses all 4 patterns</div>
-        <div class="callout-text">In <code>deployed/cplane/flowgenx_cp_grpc_server/proto/cplane.proto</code>, you'll find exactly these patterns: <code>RegisterClient</code> (unary), <code>GetClientStatus</code> (unary), <code>ExecuteAPIRequest</code> (unary), and <code>StreamMessages</code> (bidirectional streaming) — the most important one that keeps the dplane connected.</div>
+        <div class="callout-title">Real-world cplane.proto uses all 4 patterns</div>
+        <div class="callout-text">In a production B2B control plane, you'll find exactly these patterns: <code>RegisterClient</code> (unary), <code>GetClientStatus</code> (unary), <code>ExecuteAPIRequest</code> (unary), and <code>StreamMessages</code> (bidirectional streaming) — the most important one that keeps the data plane permanently connected.</div>
       </div>
     </div>
   </section>
@@ -241,7 +242,7 @@ python -m grpc_tools.protoc \
       <span class="callout-icon">💡</span>
       <div class="callout-body">
         <div class="callout-title">Never edit generated files</div>
-        <div class="callout-text">The files ending in <code>_pb2.py</code> and <code>_pb2_grpc.py</code> are auto-generated. Never edit them manually — they get overwritten every time you run <code>protoc</code>. In FlowGenX's dplane client, these live in <code>proto/</code> and are committed to the repo so no compile step is needed at runtime.</div>
+        <div class="callout-text">The files ending in <code>_pb2.py</code> and <code>_pb2_grpc.py</code> are auto-generated. Never edit them manually — they get overwritten every time you run <code>protoc</code>. A common practice is to commit generated stubs to the repo so no compile step is needed at runtime on each deployment.</div>
       </div>
     </div>
   </section>
@@ -391,7 +392,7 @@ ls proto/
     </div>
     <div id="ex2-q" class="ex-panel active">
       <div class="exercise-task">
-        <h3>Add to your cplane.proto:</h3>
+        <h3>Add to cplane.proto:</h3>
         <p>
           1. Add a <code>ClientStatus</code> enum with values: <code>CONNECTED</code>, <code>DISCONNECTED</code>, <code>ERROR</code><br/><br/>
           2. Add a <code>GetStatusRequest</code> message with fields: <code>client_id</code> (string), <code>session_id</code> (string)<br/><br/>
@@ -437,7 +438,7 @@ service ControlPlane {
   </div>
   <div class="completion-banner" data-lesson="2">
     <h2>🎉 Lesson 2 Complete!</h2>
-    <p>You've written your first .proto file and generated Python stubs. Next: master the advanced proto3 features used in your production cplane.proto.</p>
+    <p>You've written your first .proto file and generated Python stubs. Next: master the advanced proto3 features used in production control plane services.</p>
   </div>
   <div class="lesson-nav">
     <a href="lesson-01.html" class="lesson-nav-btn btn-prev">← Lesson 1: gRPC vs REST</a>
