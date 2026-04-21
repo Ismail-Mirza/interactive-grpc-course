@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>gRPC Mastery — From Beginner to Production</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo">
+      <div class="nav-logo-icon">⚡</div>
+      gRPC Mastery
+    </a>
+    <div class="nav-progress-wrap">
+      <span class="nav-progress-count">0/10</span>
+      <div class="nav-progress-bar"><div class="nav-progress-fill" style="width:0%"></div></div>
+    </div>
+  </div>
+</nav>
+
+<header class="index-hero">
+  <div class="container">
+    <p class="hero-eyebrow">FlowGenX — B2B Deployment Series</p>
+    <h1>Master <span>gRPC</span><br/>From Zero to Production</h1>
+    <p>A complete 10-lesson journey from Protocol Buffers basics to building a production-grade bidirectional streaming cplane↔dplane system.</p>
+    <div class="hero-cta">
+      <a href="lesson-01.html" class="btn-hero btn-hero-primary">▶ Start Learning</a>
+      <a href="#lessons" class="btn-hero btn-hero-secondary">View All Lessons</a>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat"><span class="hero-stat-num">10</span><span class="hero-stat-label">Lessons</span></div>
+      <div class="hero-stat"><span class="hero-stat-num">8h+</span><span class="hero-stat-label">Content</span></div>
+      <div class="hero-stat"><span class="hero-stat-num">50+</span><span class="hero-stat-label">Code Examples</span></div>
+      <div class="hero-stat"><span class="hero-stat-num">20+</span><span class="hero-stat-label">Videos</span></div>
+    </div>
+  </div>
+</header>
+
+<main style="padding: 60px 0 80px;">
+  <div class="container-wide">
+
+    <div class="progress-section fade-in">
+      <div class="progress-header">
+        <span class="progress-title">Your Progress</span>
+        <span class="progress-count">0 of 10 completed</span>
+      </div>
+      <div class="big-progress-bar"><div class="big-progress-fill" style="width:0%"></div></div>
+      <div class="progress-steps">
+        <div class="progress-dot" title="Lesson 1"></div>
+        <div class="progress-dot" title="Lesson 2"></div>
+        <div class="progress-dot" title="Lesson 3"></div>
+        <div class="progress-dot" title="Lesson 4"></div>
+        <div class="progress-dot" title="Lesson 5"></div>
+        <div class="progress-dot" title="Lesson 6"></div>
+        <div class="progress-dot" title="Lesson 7"></div>
+        <div class="progress-dot" title="Lesson 8"></div>
+        <div class="progress-dot" title="Lesson 9"></div>
+        <div class="progress-dot" title="Lesson 10"></div>
+      </div>
+    </div>
+
+    <h2 id="lessons" style="font-size:28px; font-weight:800; margin-top:48px; margin-bottom:8px;">Course Curriculum</h2>
+    <p style="color:var(--text-muted); margin-bottom:8px;">Build a complete mini cplane↔dplane system from scratch across 10 progressive lessons.</p>
+
+    <div class="lessons-grid">
+
+      <a href="lesson-01.html" class="lesson-card fade-in" data-lesson="1">
+        <div class="card-num">Lesson 01 · Beginner</div>
+        <div class="card-title">gRPC vs REST — The Why</div>
+        <div class="card-desc">Understand why gRPC exists, how HTTP/2 differs from HTTP/1.1, and why your cplane↔dplane architecture uses gRPC.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">HTTP/2</span><span class="card-tag">Protobuf</span><span class="card-tag">Concepts</span></div>
+          <div class="card-status">→ Start</div>
+        </div>
+      </a>
+
+      <a href="lesson-02.html" class="lesson-card fade-in" data-lesson="2">
+        <div class="card-num">Lesson 02 · Beginner</div>
+        <div class="card-title">Proto3 Foundations</div>
+        <div class="card-desc">Learn .proto syntax, scalar types, messages, enums, services and how to compile with protoc to generate Python stubs.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">proto3</span><span class="card-tag">protoc</span><span class="card-tag">Stubs</span></div>
+          <div class="card-status">→ Start</div>
+        </div>
+      </a>
+
+      <a href="lesson-03.html" class="lesson-card fade-in" data-lesson="3">
+        <div class="card-num">Lesson 03 · Beginner+</div>
+        <div class="card-title">Advanced Proto3</div>
+        <div class="card-desc">Master oneof, map fields, nested messages, well-known types (Timestamp, Any), reserved fields, and backward compatibility.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">oneof</span><span class="card-tag">map</span><span class="card-tag">Well-known types</span></div>
+          <div class="card-status">→ Start</div>
+        </div>
+      </a>
+
+      <a href="lesson-04.html" class="lesson-card fade-in" data-lesson="4">
+        <div class="card-num">Lesson 04 · Intermediate</div>
+        <div class="card-title">Unary RPC</div>
+        <div class="card-desc">Build your first gRPC server and client in Python. Implement RegisterClient RPC with channel, stub, and servicer patterns.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">Python</span><span class="card-tag">Server</span><span class="card-tag">Client</span></div>
+          <div class="card-status">→ Start</div>
+        </div>
+      </a>
+
+      <a href="lesson-05.html" class="lesson-card fade-in" data-lesson="5">
+        <div class="card-num">Lesson 05 · Intermediate</div>
+        <div class="card-title">Streaming Patterns</div>
+        <div class="card-desc">All 4 RPC types — unary, server streaming, client streaming, and bidirectional. Build the StreamMessages persistent stream.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">Streaming</span><span class="card-tag">Bidirectional</span><span class="card-tag">asyncio</span></div>
+          <div class="card-status">→ Start</div>
+        </div>
+      </a>
+
+      <a href="lesson-06.html" class="lesson-card fade-in" data-lesson="6">
+        <div class="card-num">Lesson 06 · Intermediate</div>
+        <div class="card-title">Error Handling</div>
+        <div class="card-desc">gRPC status codes, context.abort(), RpcError, the rich error model with google.rpc.Status and structured error details.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">Status codes</span><span class="card-tag">Error details</span><span class="card-tag">Retries</span></div>
+          <div class="card-status">→ Start</div>
+        </div>
+      </a>
+
+      <a href="lesson-07.html" class="lesson-card fade-in" data-lesson="7">
+        <div class="card-num">Lesson 07 · Intermediate+</div>
+        <div class="card-title">Interceptors, Metadata & Deadlines</div>
+        <div class="card-desc">Build client and server interceptors, propagate metadata headers, enforce deadlines, and add distributed tracing IDs.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">Interceptors</span><span class="card-tag">Metadata</span><span class="card-tag">Deadlines</span></div>
+          <div class="card-status">→ Start</div>
+        </div>
+      </a>
+
+      <a href="lesson-08.html" class="lesson-card fade-in" data-lesson="8">
+        <div class="card-num">Lesson 08 · Advanced</div>
+        <div class="card-title">Security — TLS & JWT Auth</div>
+        <div class="card-desc">Secure your channel with TLS, generate certificates with OpenSSL, and implement JWT authentication interceptors on both sides.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">TLS</span><span class="card-tag">JWT</span><span class="card-tag">Auth</span></div>
+          <div class="card-status">→ Start</div>
+        </div>
+      </a>
+
+      <a href="lesson-09.html" class="lesson-card fade-in" data-lesson="9">
+        <div class="card-num">Lesson 09 · Advanced</div>
+        <div class="card-title">Observability, Health & Testing</div>
+        <div class="card-desc">gRPC health protocol, Prometheus metrics, OpenTelemetry tracing, grpcurl for manual testing, and unit/integration testing.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">Prometheus</span><span class="card-tag">OpenTelemetry</span><span class="card-tag">Testing</span></div>
+          <div class="card-status">→ Start</div>
+        </div>
+      </a>
+
+      <a href="lesson-10.html" class="lesson-card fade-in" data-lesson="10">
+        <div class="card-num">Lesson 10 · Capstone</div>
+        <div class="card-title">Production cplane↔dplane</div>
+        <div class="card-desc">Bring it all together — bidirectional streaming + JWT auth + heartbeat + exponential backoff reconnection. A complete mini production system.</div>
+        <div class="card-footer">
+          <div class="card-tags"><span class="card-tag">Capstone</span><span class="card-tag">Production</span><span class="card-tag">Docker</span></div>
+          <div class="card-status">→ Start</div>
+        </div>
+      </a>
+
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;margin-top:40px;">
+      <h3 style="font-size:20px;font-weight:700;margin-bottom:12px;">🏗️ What You'll Build</h3>
+      <p style="color:var(--text-muted);margin-bottom:20px;">A mini version of FlowGenX's cplane↔dplane system, built step by step across all 10 lessons:</p>
+      <div style="font-family:monospace;background:var(--code-bg);color:var(--code-text);padding:24px;border-radius:var(--radius);font-size:13px;line-height:1.8;">
+        grpc-demo/<br/>
+        ├── proto/<br/>
+        │&nbsp;&nbsp;&nbsp;└── cplane.proto&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#6ee7b7;"># Lessons 2–3: Protocol definition</span><br/>
+        ├── cplane/<br/>
+        │&nbsp;&nbsp;&nbsp;├── server.py&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#6ee7b7;"># Lessons 4–10: Control plane server</span><br/>
+        │&nbsp;&nbsp;&nbsp;├── interceptors.py&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#6ee7b7;"># Lesson 7–8: JWT + tracing</span><br/>
+        │&nbsp;&nbsp;&nbsp;└── metrics.py&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#6ee7b7;"># Lesson 9: Prometheus</span><br/>
+        ├── dplane/<br/>
+        │&nbsp;&nbsp;&nbsp;├── client.py&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#6ee7b7;"># Lessons 4–10: Data plane client</span><br/>
+        │&nbsp;&nbsp;&nbsp;└── reconnect.py&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#6ee7b7;"># Lesson 10: Backoff reconnection</span><br/>
+        ├── docker-compose.yml&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#6ee7b7;"># Lesson 10: Full stack</span><br/>
+        └── requirements.txt
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <p>Built for FlowGenX B2B Deployment Learning · <a href="https://grpc.io" target="_blank">grpc.io</a> · <a href="https://protobuf.dev" target="_blank">protobuf.dev</a></p>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

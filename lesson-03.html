@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lesson 3: Advanced Proto3 | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links"><a href="index.html" class="nav-link">← All Lessons</a></div>
+    <div class="nav-progress-wrap"><span class="nav-progress-count">0/10</span><div class="nav-progress-bar"><div class="nav-progress-fill"></div></div></div>
+  </div>
+</nav>
+
+<header class="lesson-hero">
+  <div class="container">
+    <div class="lesson-badge">Lesson 3 of 10 · Beginner+</div>
+    <h1>Advanced Proto3</h1>
+    <p class="lesson-subtitle">Master oneof, map fields, nested messages, well-known types, and backward-compatible schema evolution — the patterns your production cplane.proto uses.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">⏱ 50 min</span>
+      <span class="lesson-meta-item">🔨 Proto3 features</span>
+      <span class="lesson-meta-item">📁 Extends: cplane.proto</span>
+    </div>
+  </div>
+</header>
+
+<main><div class="container">
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🎭</span> oneof — When a Field Can Be Multiple Types</h2>
+    <p>A <code>oneof</code> field means "exactly one of these fields will be set". It's proto3's way of expressing a discriminated union. This is essential when a message can carry different payload types.</p>
+
+    <div class="callout architecture">
+      <span class="callout-icon">🔮</span>
+      <div class="callout-body">
+        <div class="callout-title">Used in your production cplane.proto</div>
+        <div class="callout-text">The <code>StreamMessage</code> in FlowGenX's cplane uses <code>oneof payload</code> so a single message type can carry either an API request, a callback, a heartbeat, or a raw JSON payload — without separate message types for each.</div>
+      </div>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">proto3</span><span class="code-filename">cplane.proto</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-protobuf">message APIPayload {
+  string method = 1;
+  string path   = 2;
+  string body   = 3;
+}
+
+message CallbackPayload {
+  string request_id = 1;
+  string result     = 2;
+  bool   success    = 3;
+}
+
+message StreamMessage {
+  string      message_id = 1;
+  MessageType type       = 2;
+  string      client_id  = 3;
+
+  // oneof: only ONE of these will be set in any given message
+  oneof payload {
+    string          json_payload     = 4;  // raw JSON
+    APIPayload      api_payload      = 5;  // API call details
+    CallbackPayload callback_payload = 6;  // callback result
+  }
+}
+</code></pre>
+    </div>
+
+    <p>In Python, you check which field is set with <code>message.WhichOneof('payload')</code>:</p>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Usage</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">msg = cplane_pb2.StreamMessage(
+    message_id="abc123",
+    type=cplane_pb2.HEARTBEAT,
+    client_id="dplane-1"
+    # no payload set for heartbeat
+)
+
+# Check which oneof variant is set
+field = msg.WhichOneof('payload')
+# Returns: None, 'json_payload', 'api_payload', or 'callback_payload'
+
+if field == 'api_payload':
+    print(msg.api_payload.path)
+elif field is None:
+    print("heartbeat - no payload")
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🗺️</span> map — Key-Value Pairs</h2>
+    <p>A <code>map</code> field is proto3's dictionary. Perfect for metadata, headers, or configuration key-value pairs.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">proto3</span><span class="code-filename">example</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-protobuf">message MessageWithMetadata {
+  string message_id = 1;
+  string payload    = 2;
+
+  // map<key_type, value_type> field_name = number;
+  map&lt;string, string&gt; metadata    = 3;  // {"trace-id": "abc", "env": "prod"}
+  map&lt;string, int32&gt;  retry_counts = 4;  // {"service-a": 3, "service-b": 1}
+}
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Using map in Python</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">msg = cplane_pb2.MessageWithMetadata(
+    message_id="xyz789",
+    payload="data",
+)
+# Set map fields like a dict
+msg.metadata["trace-id"] = "abc-123"
+msg.metadata["env"] = "production"
+msg.metadata["dplane-version"] = "2.1.0"
+
+# Read
+print(msg.metadata["trace-id"])   # "abc-123"
+print(dict(msg.metadata))         # {"trace-id": "abc-123", ...}
+</code></pre>
+    </div>
+
+    <div class="callout warning">
+      <span class="callout-icon">⚠️</span>
+      <div class="callout-body">
+        <div class="callout-title">map keys can't be float/double or bytes</div>
+        <div class="callout-text">Map key types are limited to scalar types except <code>float</code>, <code>double</code>, and <code>bytes</code>. <code>string</code> is the most common key type. Map fields cannot be <code>repeated</code>.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">⌚</span> Well-Known Types</h2>
+    <p>Google ships a set of pre-defined proto messages called Well-Known Types. Import them to handle common data types that proto3 lacks natively.</p>
+
+    <table class="compare-table">
+      <thead><tr><th>Import</th><th>Type</th><th>Python equivalent</th><th>Use case</th></tr></thead>
+      <tbody>
+        <tr><td><code>google/protobuf/timestamp.proto</code></td><td><code>google.protobuf.Timestamp</code></td><td><code>datetime</code></td><td>UTC timestamps</td></tr>
+        <tr><td><code>google/protobuf/duration.proto</code></td><td><code>google.protobuf.Duration</code></td><td><code>timedelta</code></td><td>Time durations</td></tr>
+        <tr><td><code>google/protobuf/any.proto</code></td><td><code>google.protobuf.Any</code></td><td>Any message type</td><td>Dynamic payloads</td></tr>
+        <tr><td><code>google/protobuf/struct.proto</code></td><td><code>google.protobuf.Struct</code></td><td><code>dict</code></td><td>JSON-like data</td></tr>
+        <tr><td><code>google/protobuf/wrappers.proto</code></td><td><code>StringValue</code>, <code>Int32Value</code>...</td><td>Nullable scalars</td><td>Optional primitives</td></tr>
+      </tbody>
+    </table>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">proto3</span><span class="code-filename">Using Timestamp</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-protobuf">syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+message HeartbeatMessage {
+  string                    client_id  = 1;
+  google.protobuf.Timestamp sent_at    = 2;  // UTC timestamp
+  google.protobuf.Struct    metrics    = 3;  // arbitrary JSON-like data
+}
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Working with Timestamp in Python</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">from google.protobuf.timestamp_pb2 import Timestamp
+from datetime import datetime, timezone
+
+# Create a Timestamp from now
+ts = Timestamp()
+ts.FromDatetime(datetime.now(timezone.utc))
+
+# Use it in a message
+hb = cplane_pb2.HeartbeatMessage(
+    client_id="dplane-1",
+    sent_at=ts,
+)
+
+# Convert back to Python datetime
+dt = hb.sent_at.ToDatetime(tzinfo=timezone.utc)
+print(dt)  # 2024-01-15 10:30:00+00:00
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔒</span> Backward Compatibility — Schema Evolution</h2>
+    <p>gRPC services live for years. Rules for changing your proto without breaking existing clients:</p>
+
+    <table class="compare-table">
+      <thead><tr><th>Change</th><th>Safe?</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Add a new field</td><td><span class="badge badge-green">✓ Safe</span></td><td>Old clients ignore unknown fields</td></tr>
+        <tr><td>Remove a field</td><td><span class="badge badge-yellow">⚠ Reserve it</span></td><td>Old clients may still send it — reserve the number</td></tr>
+        <tr><td>Rename a field</td><td><span class="badge badge-green">✓ Safe</span></td><td>Wire format uses field numbers, not names</td></tr>
+        <tr><td>Change a field number</td><td><span class="badge badge-red">✗ Never</span></td><td>Wire format breaks — old/new clients misread data</td></tr>
+        <tr><td>Change field type (compatible)</td><td><span class="badge badge-yellow">⚠ Sometimes</span></td><td>int32→int64 is ok; string→int32 is not</td></tr>
+        <tr><td>Add enum value</td><td><span class="badge badge-green">✓ Safe</span></td><td>Old clients get 0 (unknown)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">proto3</span><span class="code-filename">Using reserved</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-protobuf">message ClientInfo {
+  string client_id  = 1;
+  string tenant_id  = 2;
+  // string old_field = 3;  ← REMOVED
+
+  // Reserve removed field numbers AND names to prevent reuse
+  reserved 3;
+  reserved "old_field";
+
+  string version = 4;  // new field added later
+}
+</code></pre>
+    </div>
+  </section>
+
+  <!-- Demo Step -->
+  <section class="content-section fade-in" style="border-color:var(--primary);border-width:2px;">
+    <h2><span class="section-icon">🛠️</span> Demo Project — Upgrade cplane.proto</h2>
+    <p>Upgrade your <code>cplane.proto</code> from Lesson 2 with production-grade patterns:</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">proto3</span><span class="code-filename">grpc-demo/proto/cplane.proto (upgraded)</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-protobuf">syntax = "proto3";
+
+package cplane;
+
+import "google/protobuf/timestamp.proto";
+
+// ─── Enums ───────────────────────────────────────────
+enum MessageType {
+  UNKNOWN          = 0;
+  CLIENT_REQUEST   = 1;
+  SERVER_REQUEST   = 2;
+  RESPONSE         = 3;
+  HEARTBEAT        = 4;
+  API_REQUEST      = 5;
+  API_RESPONSE     = 6;
+}
+
+enum ActionType {
+  GET    = 0;
+  POST   = 1;
+  PUT    = 2;
+  DELETE = 3;
+  PATCH  = 4;
+}
+
+enum ClientStatus {
+  ACTIVE       = 0;
+  DISCONNECTED = 1;
+  ERROR        = 2;
+}
+
+// ─── Payload Types ───────────────────────────────────
+message APIPayload {
+  ActionType action  = 1;
+  string     path    = 2;
+  string     body    = 3;
+  map&lt;string, string&gt; headers = 4;
+}
+
+message CallbackPayload {
+  string request_id      = 1;
+  string result          = 2;
+  bool   success         = 3;
+  int32  status_code     = 4;
+}
+
+// ─── Registration ────────────────────────────────────
+message RegisterRequest {
+  string client_id  = 1;
+  string tenant_id  = 2;
+  string auth_token = 3;
+  string version    = 4;
+  map&lt;string, string&gt; capabilities = 5;
+}
+
+message RegisterResponse {
+  bool   success    = 1;
+  string session_id = 2;
+  string message    = 3;
+}
+
+// ─── Status ──────────────────────────────────────────
+message GetStatusRequest {
+  string client_id  = 1;
+  string session_id = 2;
+}
+
+message GetStatusResponse {
+  string                    client_id      = 1;
+  ClientStatus              status         = 2;
+  google.protobuf.Timestamp last_heartbeat = 3;
+  int32                     message_count  = 4;
+}
+
+// ─── Streaming ───────────────────────────────────────
+message ClientMessage {
+  string                    message_id = 1;
+  MessageType               type       = 2;
+  string                    client_id  = 3;
+  google.protobuf.Timestamp sent_at    = 4;
+  map&lt;string, string&gt;       metadata   = 5;
+
+  oneof payload {
+    string          json_payload     = 6;
+    CallbackPayload callback_payload = 7;
+  }
+}
+
+message ServerMessage {
+  string                    message_id  = 1;
+  MessageType               type        = 2;
+  google.protobuf.Timestamp sent_at     = 3;
+  map&lt;string, string&gt;       metadata    = 4;
+
+  oneof payload {
+    string     json_payload = 5;
+    APIPayload api_payload  = 6;
+  }
+}
+
+// ─── Service ─────────────────────────────────────────
+service ControlPlane {
+  rpc RegisterClient  (RegisterRequest)          returns (RegisterResponse);
+  rpc GetClientStatus (GetStatusRequest)         returns (GetStatusResponse);
+  rpc StreamMessages  (stream ClientMessage)     returns (stream ServerMessage);
+}
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Regenerate stubs</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash">python -m grpc_tools.protoc \
+  -I proto/ \
+  --python_out=proto/ \
+  --grpc_python_out=proto/ \
+  proto/cplane.proto</code></pre>
+    </div>
+  </section>
+
+  <!-- Videos -->
+  <section class="video-section fade-in">
+    <h2>📺 Video Resources</h2>
+    <div class="video-grid">
+      <a href="https://www.youtube.com/watch?v=3r327rjB8qg" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="3r327rjB8qg">
+          <img src="" alt="Protobuf deep dive"/><div class="play-overlay"><div class="play-btn">▶</div></div>
+        </div>
+        <div class="video-info">
+          <div class="video-title">[gRPC #7] Protobuf Deep-Dive — oneof, enum, repeated fields</div>
+          <div class="video-meta"><span class="video-tag">Deep Dive</span> All advanced proto3 features</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=AW09fAsEb00" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="AW09fAsEb00">
+          <img src="" alt="Complete Proto3 intro"/><div class="play-overlay"><div class="play-btn">▶</div></div>
+        </div>
+        <div class="video-info">
+          <div class="video-title">Complete Introduction to Protocol Buffers 3</div>
+          <div class="video-meta"><span class="video-tag">Complete</span> Full course on proto3</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Exercise -->
+  <section class="exercise-section fade-in">
+    <h2>💪 Exercise</h2>
+    <p class="exercise-subtitle">Practice advanced proto3 patterns.</p>
+    <div class="exercise-tabs">
+      <button class="ex-tab active" data-target="ex3-q">Task</button>
+      <button class="ex-tab" data-target="ex3-a">Solution</button>
+    </div>
+    <div id="ex3-q" class="ex-panel active">
+      <div class="exercise-task">
+        <h3>Write Python code that:</h3>
+        <p>
+          1. Creates a <code>ClientMessage</code> with type <code>API_REQUEST</code>, a map metadata with <code>"trace-id": "t-001"</code>, and an <code>api_payload</code> with <code>action=POST</code>, <code>path="/api/run"</code>, <code>body='{"workflow":"wf-1"}'</code><br/><br/>
+          2. Creates a heartbeat <code>ClientMessage</code> with no payload but with a Timestamp<br/><br/>
+          3. Prints which <code>oneof</code> variant is set for each message
+        </p>
+      </div>
+    </div>
+    <div id="ex3-a" class="ex-panel">
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Solution</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">import sys
+sys.path.insert(0, 'proto')
+
+import cplane_pb2
+from google.protobuf.timestamp_pb2 import Timestamp
+from datetime import datetime, timezone
+
+# 1. API request message with oneof api_payload
+api_msg = cplane_pb2.ClientMessage(
+    message_id="msg-001",
+    type=cplane_pb2.API_REQUEST,
+    client_id="dplane-1",
+    api_payload=cplane_pb2.APIPayload(
+        action=cplane_pb2.POST,
+        path="/api/run",
+        body='{"workflow":"wf-1"}',
+    )
+)
+api_msg.metadata["trace-id"] = "t-001"
+
+# 2. Heartbeat with Timestamp, no payload
+ts = Timestamp()
+ts.FromDatetime(datetime.now(timezone.utc))
+
+hb_msg = cplane_pb2.ClientMessage(
+    message_id="msg-002",
+    type=cplane_pb2.HEARTBEAT,
+    client_id="dplane-1",
+    sent_at=ts,
+)
+
+# 3. Check oneof
+print(api_msg.WhichOneof('payload'))  # 'api_payload'
+print(hb_msg.WhichOneof('payload'))   # None (heartbeat has no payload)
+</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <div style="text-align:center;margin-bottom:32px;">
+    <button class="complete-btn" data-lesson="3">✓ Mark Lesson 3 Complete</button>
+  </div>
+  <div class="completion-banner" data-lesson="3">
+    <h2>🎉 Lesson 3 Complete!</h2>
+    <p>Your proto file now uses production-grade patterns. Next: bring it to life with a real Python gRPC server and client.</p>
+  </div>
+  <div class="lesson-nav">
+    <a href="lesson-02.html" class="lesson-nav-btn btn-prev">← Lesson 2: Proto3 Foundations</a>
+    <a href="lesson-04.html" class="lesson-nav-btn btn-next">Lesson 4: Unary RPC →</a>
+  </div>
+
+</div></main>
+<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · <a href="https://protobuf.dev/programming-guides/proto3/" target="_blank">Proto3 Language Guide</a></p></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

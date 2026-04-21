@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lesson 7: Interceptors, Metadata & Deadlines | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links"><a href="index.html" class="nav-link">← All Lessons</a></div>
+    <div class="nav-progress-wrap"><span class="nav-progress-count">0/10</span><div class="nav-progress-bar"><div class="nav-progress-fill"></div></div></div>
+  </div>
+</nav>
+
+<header class="lesson-hero">
+  <div class="container">
+    <div class="lesson-badge">Lesson 7 of 10 · Intermediate+</div>
+    <h1>Interceptors, Metadata &amp; Deadlines</h1>
+    <p class="lesson-subtitle">Build middleware for gRPC — attach metadata headers to requests, enforce deadlines, add distributed tracing IDs, and write client/server interceptors that run on every call.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">⏱ 60 min</span>
+      <span class="lesson-meta-item">🔧 Middleware</span>
+      <span class="lesson-meta-item">📁 Creates: interceptors.py</span>
+    </div>
+  </div>
+</header>
+
+<main><div class="container">
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📋</span> gRPC Metadata — Like HTTP Headers</h2>
+    <p>Metadata is key-value pairs attached to a gRPC call — similar to HTTP headers. The client sends metadata with the request; the server reads it from <code>context.invocation_metadata()</code>. The server can also send metadata back in the response trailing metadata.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Client: sending metadata</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import grpc
+import uuid
+
+# Option 1: Pass metadata directly to the stub call
+response = stub.RegisterClient(
+    request,
+    metadata=[
+        ('x-trace-id', str(uuid.uuid4())),
+        ('x-tenant-id', 'tenant-abc'),
+        ('x-client-version', '2.1.0'),
+        ('authorization', 'Bearer eyJhb...'),
+    ]
+)
+
+# Option 2: Build reusable metadata as a tuple list
+def build_metadata(trace_id=None, auth_token=None):
+    meta = []
+    if trace_id:
+        meta.append(('x-trace-id', trace_id))
+    if auth_token:
+        meta.append(('authorization', f'Bearer {auth_token}'))
+    return meta
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Server: reading metadata</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">def RegisterClient(self, request, context):
+    # Read metadata from the incoming request
+    meta = dict(context.invocation_metadata())
+    trace_id = meta.get('x-trace-id', 'unknown')
+    auth_token = meta.get('authorization', '').replace('Bearer ', '')
+
+    logger.info(f"RegisterClient trace_id={trace_id}")
+
+    # Send trailing metadata back to client
+    context.set_trailing_metadata([
+        ('x-server-version', '1.0.0'),
+        ('x-trace-id', trace_id),  # echo back for correlation
+    ])
+
+    return cplane_pb2.RegisterResponse(success=True, session_id="abc")
+</code></pre>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">💡</span>
+      <div class="callout-body">
+        <div class="callout-title">Metadata key naming convention</div>
+        <div class="callout-text">Metadata keys are lowercase. Binary data uses keys ending in <code>-bin</code> (e.g. <code>auth-token-bin</code>), which are base64-encoded automatically. In FlowGenX's dplane client, auth tokens and trace IDs are sent as metadata on every call.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔌</span> Interceptors — gRPC Middleware</h2>
+    <p>Interceptors run before/after every RPC call. They're perfect for: logging, auth, tracing, rate limiting, and metrics. gRPC Python supports both client and server interceptors.</p>
+
+    <h3>Server Interceptor</h3>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">grpc-demo/cplane/interceptors.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import grpc
+import time
+import uuid
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class LoggingInterceptor(grpc.ServerInterceptor):
+    """Logs every RPC call with duration and trace ID."""
+
+    def intercept_service(self, continuation, handler_call_details):
+        method = handler_call_details.method  # e.g. "/cplane.ControlPlane/RegisterClient"
+        start = time.monotonic()
+
+        # Get trace ID from metadata
+        meta = dict(handler_call_details.invocation_metadata)
+        trace_id = meta.get('x-trace-id', str(uuid.uuid4()))
+
+        logger.info(f"→ {method} trace={trace_id}")
+
+        # Call the actual handler
+        handler = continuation(handler_call_details)
+
+        # Wrap the handler to measure duration
+        if handler and handler.unary_unary:
+            original = handler.unary_unary
+            def timed_handler(request, context):
+                try:
+                    result = original(request, context)
+                    duration = (time.monotonic() - start) * 1000
+                    logger.info(f"← {method} OK {duration:.1f}ms trace={trace_id}")
+                    return result
+                except Exception as e:
+                    logger.error(f"← {method} ERROR {e} trace={trace_id}")
+                    raise
+            return handler._replace(unary_unary=timed_handler)
+
+        return handler
+
+
+class AuthInterceptor(grpc.ServerInterceptor):
+    """Validates that all calls (except Register) have a valid session."""
+
+    EXEMPT_METHODS = {'/cplane.ControlPlane/RegisterClient'}
+
+    def intercept_service(self, continuation, handler_call_details):
+        method = handler_call_details.method
+        if method in self.EXEMPT_METHODS:
+            return continuation(handler_call_details)
+
+        meta = dict(handler_call_details.invocation_metadata)
+        session_id = meta.get('x-session-id')
+
+        if not session_id:
+            def deny(request, context):
+                context.abort(grpc.StatusCode.UNAUTHENTICATED, "x-session-id header required")
+            return grpc.unary_unary_rpc_method_handler(deny)
+
+        # Full JWT validation in Lesson 8
+        return continuation(handler_call_details)
+</code></pre>
+    </div>
+
+    <h3>Register interceptors on the server</h3>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">server.py — add interceptors</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">from interceptors import LoggingInterceptor, AuthInterceptor
+
+def serve(port=50051):
+    # Add interceptors — they run in order
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=10),
+        interceptors=[
+            LoggingInterceptor(),
+            AuthInterceptor(),
+        ]
+    )
+    cplane_pb2_grpc.add_ControlPlaneServicer_to_server(ControlPlaneServicer(), server)
+    server.add_insecure_port(f'[::]:{port}')
+    server.start()
+    server.wait_for_termination()
+</code></pre>
+    </div>
+
+    <h3>Client Interceptor</h3>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Client interceptor — auto-attach trace ID</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import grpc
+import uuid
+
+
+class TraceInterceptor(grpc.UnaryUnaryClientInterceptor,
+                        grpc.UnaryStreamClientInterceptor,
+                        grpc.StreamStreamClientInterceptor):
+    """Automatically adds x-trace-id to every outgoing RPC."""
+
+    def _add_metadata(self, client_call_details):
+        metadata = list(client_call_details.metadata or [])
+        metadata.append(('x-trace-id', str(uuid.uuid4())))
+        return client_call_details._replace(metadata=metadata)
+
+    def intercept_unary_unary(self, continuation, client_call_details, request):
+        return continuation(self._add_metadata(client_call_details), request)
+
+    def intercept_unary_stream(self, continuation, client_call_details, request):
+        return continuation(self._add_metadata(client_call_details), request)
+
+    def intercept_stream_stream(self, continuation, client_call_details, request_iterator):
+        return continuation(self._add_metadata(client_call_details), request_iterator)
+
+
+# Use it when creating the channel
+channel = grpc.intercept_channel(
+    grpc.insecure_channel('localhost:50051'),
+    TraceInterceptor()
+)
+stub = cplane_pb2_grpc.ControlPlaneStub(channel)
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">⏱️</span> Deadlines and Timeouts</h2>
+    <p>A <strong>deadline</strong> is an absolute point in time by which an RPC must complete. A <strong>timeout</strong> is a duration. gRPC propagates deadlines automatically through the call chain.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Setting timeouts on client calls</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import grpc
+
+# timeout= is in seconds
+try:
+    response = stub.RegisterClient(request, timeout=5.0)
+except grpc.RpcError as e:
+    if e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+        print("RegisterClient timed out after 5 seconds")
+
+
+# Using an absolute deadline (datetime)
+from datetime import datetime, timezone, timedelta
+
+deadline = datetime.now(timezone.utc) + timedelta(seconds=10)
+response = stub.RegisterClient(
+    request,
+    timeout=(deadline - datetime.now(timezone.utc)).total_seconds()
+)
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Server: checking remaining deadline</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">def RegisterClient(self, request, context):
+    # Check how much time we have left
+    time_remaining = context.time_remaining()
+    if time_remaining is not None and time_remaining < 0.5:
+        context.abort(grpc.StatusCode.DEADLINE_EXCEEDED,
+                      "Not enough time to process request")
+
+    # Long operation — periodically check if client is still waiting
+    for step in range(10):
+        if not context.is_active():
+            logger.info("Client cancelled request mid-processing")
+            return  # clean exit
+        process_step(step)
+
+    return cplane_pb2.RegisterResponse(success=True)
+</code></pre>
+    </div>
+
+    <div class="callout warning">
+      <span class="callout-icon">⚠️</span>
+      <div class="callout-body">
+        <div class="callout-title">Don't set timeouts on streaming RPCs</div>
+        <div class="callout-text">For <code>StreamMessages</code>, don't use <code>timeout=</code> — the stream is meant to stay open indefinitely. Timeouts are for unary RPCs like <code>RegisterClient</code> and <code>GetClientStatus</code> where you expect a quick response.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Videos -->
+  <section class="video-section fade-in">
+    <h2>📺 Video Resources</h2>
+    <div class="video-grid">
+      <a href="https://www.youtube.com/watch?v=TZShbZVNbLc" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="TZShbZVNbLc"><img src="" alt="gRPC Interceptors"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">How Do gRPC Interceptors Work &amp; How To Use Them</div>
+          <div class="video-meta"><span class="video-tag">Interceptors</span> Client and server interceptor patterns</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=xrhDPO3zlAQ" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="xrhDPO3zlAQ"><img src="" alt="gRPC Deadlines"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">gRPC Deadline vs REST HTTP Timeout — Explained</div>
+          <div class="video-meta"><span class="video-tag">Deadlines</span> Why gRPC deadlines are better</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Exercise -->
+  <section class="exercise-section fade-in">
+    <h2>💪 Exercise</h2>
+    <p class="exercise-subtitle">Build a rate-limiting server interceptor.</p>
+    <div class="exercise-tabs">
+      <button class="ex-tab active" data-target="ex7-q">Task</button>
+      <button class="ex-tab" data-target="ex7-a">Solution</button>
+    </div>
+    <div id="ex7-q" class="ex-panel active">
+      <div class="exercise-task">
+        <h3>Create a RateLimitInterceptor:</h3>
+        <p>
+          1. Track how many times each <code>client_id</code> (from metadata <code>x-client-id</code>) calls <code>RegisterClient</code> per minute<br/><br/>
+          2. If a client calls more than 5 times per minute, abort with <code>RESOURCE_EXHAUSTED</code> and message "Rate limit exceeded: max 5 registrations per minute"<br/><br/>
+          3. Add <code>RetryInfo</code> to the error details with a 60-second retry delay<br/><br/>
+          <em>Hint: use a dict with <code>(client_id, minute_bucket)</code> as key</em>
+        </p>
+      </div>
+    </div>
+    <div id="ex7-a" class="ex-panel">
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Solution</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from collections import defaultdict
+from grpc_status import rpc_status
+from google.rpc import status_pb2, code_pb2, error_details_pb2
+from google.protobuf.duration_pb2 import Duration
+
+class RateLimitInterceptor(grpc.ServerInterceptor):
+    MAX_CALLS = 5
+    _counts = defaultdict(int)
+
+    def _bucket(self):
+        return int(time.time() // 60)  # minute bucket
+
+    def intercept_service(self, continuation, handler_call_details):
+        meta = dict(handler_call_details.invocation_metadata)
+        client_id = meta.get('x-client-id', 'unknown')
+        key = (client_id, self._bucket())
+        self._counts[key] += 1
+
+        if self._counts[key] > self.MAX_CALLS:
+            retry_info = error_details_pb2.RetryInfo(
+                retry_delay=Duration(seconds=60)
+            )
+            rich = status_pb2.Status(
+                code=code_pb2.RESOURCE_EXHAUSTED,
+                message="Rate limit exceeded: max 5 per minute"
+            )
+            rich.details.add().Pack(retry_info)
+
+            def deny(req, ctx):
+                ctx.abort_with_status(rpc_status.to_status(rich))
+            return grpc.unary_unary_rpc_method_handler(deny)
+
+        return continuation(handler_call_details)
+</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <div style="text-align:center;margin-bottom:32px;">
+    <button class="complete-btn" data-lesson="7">✓ Mark Lesson 7 Complete</button>
+  </div>
+  <div class="completion-banner" data-lesson="7">
+    <h2>🎉 Lesson 7 Complete!</h2>
+    <p>Your service now has middleware, tracing, and deadlines. Next: add real security with TLS and JWT authentication.</p>
+  </div>
+  <div class="lesson-nav">
+    <a href="lesson-06.html" class="lesson-nav-btn btn-prev">← Lesson 6: Error Handling</a>
+    <a href="lesson-08.html" class="lesson-nav-btn btn-next">Lesson 8: Security →</a>
+  </div>
+
+</div></main>
+<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · <a href="https://grpc.io/docs/guides/interceptors/" target="_blank">gRPC Interceptors Guide</a></p></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

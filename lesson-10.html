@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lesson 10: Capstone — Production cplane↔dplane | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links"><a href="index.html" class="nav-link">← All Lessons</a></div>
+    <div class="nav-progress-wrap"><span class="nav-progress-count">0/10</span><div class="nav-progress-bar"><div class="nav-progress-fill"></div></div></div>
+  </div>
+</nav>
+
+<header class="lesson-hero" style="background: linear-gradient(135deg, #1e1b4b 0%, #4f46e5 50%, #06b6d4 100%);">
+  <div class="container">
+    <div class="lesson-badge" style="background:rgba(255,255,255,.25);">🏆 Lesson 10 of 10 · Capstone</div>
+    <h1>Production cplane↔dplane</h1>
+    <p class="lesson-subtitle">Bring everything together — bidirectional streaming + TLS + JWT auth + heartbeat + exponential backoff reconnection. A complete production-grade mini system that mirrors your real FlowGenX architecture.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">⏱ 90 min</span>
+      <span class="lesson-meta-item">🏗️ Full system</span>
+      <span class="lesson-meta-item">🐳 Docker Compose</span>
+    </div>
+  </div>
+</header>
+
+<main><div class="container">
+
+  <section class="content-section fade-in" style="border:2px solid var(--primary);">
+    <h2><span class="section-icon">🗺️</span> What We're Building</h2>
+    <p>A complete mini version of FlowGenX's cplane↔dplane system incorporating every lesson:</p>
+
+    <div class="arch-diagram">
+      <p style="font-weight:700;margin-bottom:20px;font-size:18px;">Complete Mini Architecture</p>
+      <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:start;">
+        <div style="border:2px dashed var(--cyan);border-radius:var(--radius);padding:16px;">
+          <p style="font-weight:700;color:#0e7490;font-size:13px;margin-bottom:12px;">DPLANE (Customer Network)</p>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div class="arch-box">Reconnect w/ Backoff</div>
+            <div class="arch-box">JWT Token Manager</div>
+            <div class="arch-box cyan">gRPC Client + Streaming</div>
+            <div class="arch-box">Heartbeat Thread</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-size:13px;color:var(--text-muted);padding-top:60px;">
+          <span>← TLS →</span>
+          <span>← JWT →</span>
+          <span>← Bidi Stream →</span>
+          <span>← Heartbeat →</span>
+          <span>← Commands →</span>
+          <span>← Callbacks →</span>
+        </div>
+        <div style="border:2px dashed var(--primary-light);border-radius:var(--radius);padding:16px;">
+          <p style="font-weight:700;color:var(--primary);font-size:13px;margin-bottom:12px;">CPLANE (FlowGenX Cloud)</p>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <div class="arch-box primary">gRPC Server + TLS</div>
+            <div class="arch-box">JWT Auth Interceptor</div>
+            <div class="arch-box">Logging + Metrics</div>
+            <div class="arch-box">Health Check</div>
+            <div class="arch-box">Client Registry</div>
+            <div class="arch-box">Command Push API</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📁</span> Final Project Structure</h2>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Final directory structure</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash">grpc-demo/
+├── proto/
+│   ├── cplane.proto          # Final proto from Lesson 3
+│   ├── cplane_pb2.py         # Generated
+│   └── cplane_pb2_grpc.py    # Generated
+├── cplane/
+│   ├── server.py             # Full server with TLS, interceptors
+│   ├── interceptors.py       # Logging, JWT auth, metrics
+│   ├── auth.py               # JWT create/verify
+│   └── metrics.py            # Prometheus metrics
+├── dplane/
+│   ├── client.py             # Full client with reconnect
+│   └── reconnect.py          # Exponential backoff logic
+├── certs/
+│   ├── ca.crt
+│   ├── server.crt
+│   └── server.key
+├── docker-compose.yml
+└── requirements.txt</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔄</span> Exponential Backoff Reconnection</h2>
+    <p>The most critical production pattern: when the stream drops, the dplane reconnects with exponential backoff to avoid thundering-herd problems when the cplane restarts.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">grpc-demo/dplane/reconnect.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import time
+import math
+import logging
+import random
+
+logger = logging.getLogger(__name__)
+
+
+class ExponentialBackoff:
+    """
+    Exponential backoff with jitter for reconnection.
+    Pattern: wait = min(base * 2^attempt, max_delay) + random jitter
+    """
+    def __init__(
+        self,
+        base_delay: float = 1.0,
+        max_delay: float = 60.0,
+        multiplier: float = 2.0,
+        jitter: float = 0.1,
+    ):
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.multiplier = multiplier
+        self.jitter = jitter
+        self._attempt = 0
+
+    def next_delay(self) -> float:
+        delay = min(
+            self.base_delay * (self.multiplier ** self._attempt),
+            self.max_delay
+        )
+        # Add ±10% jitter to prevent thundering herd
+        jitter_amount = delay * self.jitter * (2 * random.random() - 1)
+        self._attempt += 1
+        return max(0, delay + jitter_amount)
+
+    def reset(self):
+        self._attempt = 0
+
+    @property
+    def attempt(self):
+        return self._attempt
+
+
+# Delays for attempts 0-7:
+# 1.0s, 2.0s, 4.0s, 8.0s, 16.0s, 32.0s, 60.0s, 60.0s (capped)
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">grpc-demo/dplane/client.py — full reconnection loop</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import grpc
+import threading
+import time
+import uuid
+import logging
+from reconnect import ExponentialBackoff
+
+logger = logging.getLogger(__name__)
+
+
+class DPlaneClient:
+    def __init__(self, server_address, client_id, tenant_id, certs_dir=None):
+        self.server_address = server_address
+        self.client_id = client_id
+        self.tenant_id = tenant_id
+        self.certs_dir = certs_dir
+        self.auth_token = None
+        self.session_id = None
+        self._running = False
+        self._backoff = ExponentialBackoff(base_delay=1.0, max_delay=60.0)
+
+    def _create_channel(self):
+        if self.certs_dir:
+            with open(f'{self.certs_dir}/ca.crt', 'rb') as f:
+                root_ca = f.read()
+            creds = grpc.ssl_channel_credentials(root_certificates=root_ca)
+            return grpc.secure_channel(self.server_address, creds)
+        return grpc.insecure_channel(self.server_address)
+
+    def _metadata(self):
+        meta = [('x-client-id', self.client_id)]
+        if self.auth_token:
+            meta.append(('authorization', f'Bearer {self.auth_token}'))
+        return meta
+
+    def _register(self, stub):
+        """Register and get a JWT token."""
+        resp = stub.RegisterClient(
+            cplane_pb2.RegisterRequest(
+                client_id=self.client_id,
+                tenant_id=self.tenant_id,
+                auth_token="bootstrap-secret",  # initial secret
+                version="1.0.0",
+            ),
+            timeout=10.0,
+        )
+        if resp.success:
+            self.session_id = resp.session_id
+            self.auth_token = getattr(resp, 'jwt_token', None)
+            logger.info(f"Registered: session={self.session_id}")
+            return True
+        return False
+
+    def _stream_loop(self, stub):
+        """Run the bidirectional stream with heartbeats."""
+        import queue as q_module
+        send_queue = q_module.Queue()
+        heartbeat_event = threading.Event()
+
+        def heartbeat_thread():
+            while not heartbeat_event.wait(timeout=5.0):
+                send_queue.put(cplane_pb2.ClientMessage(
+                    message_id=str(uuid.uuid4()),
+                    type=cplane_pb2.HEARTBEAT,
+                    client_id=self.client_id,
+                ))
+
+        def message_generator():
+            while True:
+                try:
+                    msg = send_queue.get(timeout=1.0)
+                    if msg is None:
+                        return
+                    yield msg
+                except Exception:
+                    continue
+
+        hb_thread = threading.Thread(target=heartbeat_thread, daemon=True)
+        hb_thread.start()
+
+        try:
+            stream = stub.StreamMessages(
+                message_generator(),
+                metadata=self._metadata(),
+            )
+            for server_msg in stream:
+                self._handle_message(server_msg, send_queue)
+        finally:
+            heartbeat_event.set()
+            send_queue.put(None)
+
+    def _handle_message(self, msg, send_queue):
+        if msg.type == cplane_pb2.HEARTBEAT:
+            logger.debug("Heartbeat ACK")
+            return
+
+        field = msg.WhichOneof('payload')
+        if field == 'api_payload':
+            api = msg.api_payload
+            logger.info(f"Command: {api.action} {api.path}")
+            # Execute and send callback
+            send_queue.put(cplane_pb2.ClientMessage(
+                message_id=str(uuid.uuid4()),
+                type=cplane_pb2.RESPONSE,
+                client_id=self.client_id,
+                callback_payload=cplane_pb2.CallbackPayload(
+                    request_id=msg.message_id,
+                    result=f"executed {api.path}",
+                    success=True,
+                )
+            ))
+
+    def run(self):
+        """Main loop: connect, register, stream, reconnect on failure."""
+        self._running = True
+        logger.info(f"dplane client starting: {self.client_id}")
+
+        while self._running:
+            channel = None
+            try:
+                channel = self._create_channel()
+                stub = cplane_pb2_grpc.ControlPlaneStub(channel)
+
+                # Register first
+                if not self._register(stub):
+                    raise RuntimeError("Registration failed")
+
+                # Connection successful — reset backoff
+                self._backoff.reset()
+                logger.info("Connected to cplane — starting stream")
+
+                # Start streaming (blocks until stream ends)
+                self._stream_loop(stub)
+
+                logger.info("Stream ended cleanly")
+
+            except grpc.RpcError as e:
+                code = e.code()
+                logger.warning(f"gRPC error: {code} — {e.details()}")
+
+                if code == grpc.StatusCode.UNAUTHENTICATED:
+                    logger.error("Auth failed — check credentials")
+                    time.sleep(30)  # longer wait for auth issues
+
+                elif code in (grpc.StatusCode.UNAVAILABLE,
+                              grpc.StatusCode.DEADLINE_EXCEEDED):
+                    delay = self._backoff.next_delay()
+                    logger.info(f"Server unavailable. Reconnect in {delay:.1f}s "
+                                f"(attempt {self._backoff.attempt})")
+                    time.sleep(delay)
+                else:
+                    delay = self._backoff.next_delay()
+                    logger.warning(f"Unexpected error. Retry in {delay:.1f}s")
+                    time.sleep(delay)
+
+            except Exception as e:
+                delay = self._backoff.next_delay()
+                logger.error(f"Error: {e}. Retry in {delay:.1f}s")
+                time.sleep(delay)
+
+            finally:
+                if channel:
+                    channel.close()
+
+    def stop(self):
+        self._running = False
+
+
+if __name__ == '__main__':
+    import sys
+    sys.path.insert(0, '../proto')
+    import cplane_pb2, cplane_pb2_grpc
+
+    client = DPlaneClient(
+        server_address='localhost:50051',
+        client_id='dplane-tenant-abc-001',
+        tenant_id='tenant-abc',
+    )
+    try:
+        client.run()
+    except KeyboardInterrupt:
+        client.stop()
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🐳</span> Docker Compose</h2>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">yaml</span><span class="code-filename">grpc-demo/docker-compose.yml</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-yaml">version: '3.8'
+
+services:
+  cplane:
+    build:
+      context: .
+      dockerfile: cplane/Dockerfile
+    ports:
+      - "50051:50051"   # gRPC
+      - "9090:9090"     # Prometheus metrics
+    volumes:
+      - ./certs:/app/certs:ro
+    environment:
+      - JWT_SECRET=change-this-in-production
+      - LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "grpcurl", "-plaintext", "localhost:50051",
+             "grpc.health.v1.Health/Check"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  dplane-1:
+    build:
+      context: .
+      dockerfile: dplane/Dockerfile
+    environment:
+      - CPLANE_ADDRESS=cplane:50051
+      - CLIENT_ID=dplane-tenant-abc-001
+      - TENANT_ID=tenant-abc
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      cplane:
+        condition: service_healthy
+
+  dplane-2:
+    build:
+      context: .
+      dockerfile: dplane/Dockerfile
+    environment:
+      - CPLANE_ADDRESS=cplane:50051
+      - CLIENT_ID=dplane-tenant-xyz-001
+      - TENANT_ID=tenant-xyz
+    volumes:
+      - ./certs:/app/certs:ro
+    depends_on:
+      cplane:
+        condition: service_healthy
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Run the full stack</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash"># First: generate certs (from Lesson 8)
+cd grpc-demo && mkdir -p certs && cd certs
+openssl genrsa -out server.key 2048
+openssl req -new -x509 -days 365 -key server.key -out server.crt \
+  -subj "/CN=cplane"
+cp server.crt ca.crt
+
+# Start the full stack
+cd grpc-demo
+docker-compose up --build
+
+# Watch the logs
+docker-compose logs -f cplane
+docker-compose logs -f dplane-1
+
+# Check health
+grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
+
+# View Prometheus metrics
+curl localhost:9090/metrics | grep grpc
+
+# Stop
+docker-compose down</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔗</span> Your Production Code Reference</h2>
+    <p>Now that you've built the mini system, you can read your production code with full understanding:</p>
+
+    <table class="compare-table">
+      <thead><tr><th>What you built</th><th>Production equivalent</th></tr></thead>
+      <tbody>
+        <tr><td><code>grpc-demo/proto/cplane.proto</code></td><td><code>deployed/cplane/flowgenx_cp_grpc_server/proto/cplane.proto</code></td></tr>
+        <tr><td><code>grpc-demo/cplane/server.py</code></td><td><code>deployed/cplane/flowgenx_cp_grpc_server/</code></td></tr>
+        <tr><td><code>grpc-demo/dplane/client.py</code></td><td><code>deployed/dplane/flowgenx_dp_grpc_client/client_main.py</code></td></tr>
+        <tr><td><code>grpc-demo/dplane/reconnect.py</code></td><td><code>deployed/dplane/flowgenx_dp_grpc_client/handlers/</code></td></tr>
+        <tr><td><code>ExponentialBackoff</code></td><td>Connection retry logic in <code>handlers/heartbeat.py</code></td></tr>
+        <tr><td><code>MetricsInterceptor</code></td><td><code>deployed/dplane/flowgenx_dp_grpc_client/core/</code></td></tr>
+        <tr><td><code>JWTAuthInterceptor</code></td><td><code>deployed/cplane/flowgenx_cp_security_services/</code></td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout architecture">
+      <span class="callout-icon">🔮</span>
+      <div class="callout-body">
+        <div class="callout-title">What's different in production</div>
+        <div class="callout-text">The real cplane server integrates with PostgreSQL for client persistence, Redis for pub/sub when pushing commands to dplanes, OAuth2/Keycloak for auth, Kong API Gateway for routing, and Kubernetes for scaling. But the gRPC patterns — proto, streaming, auth, reconnect — are exactly what you've built here. You now understand the foundation.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📋</span> Production Checklist</h2>
+    <p>Before deploying a gRPC service to production, verify these items:</p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div>
+        <h3>Security</h3>
+        <ul>
+          <li>☐ TLS enabled (not insecure_channel)</li>
+          <li>☐ JWT or mTLS authentication</li>
+          <li>☐ Token rotation implemented</li>
+          <li>☐ Rate limiting on RegisterClient</li>
+          <li>☐ gRPC reflection disabled in prod</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Reliability</h3>
+        <ul>
+          <li>☐ Exponential backoff reconnection</li>
+          <li>☐ Heartbeat mechanism</li>
+          <li>☐ Deadlines on unary RPCs</li>
+          <li>☐ context.is_active() checks in loops</li>
+          <li>☐ Graceful shutdown (server.stop(grace=5))</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Observability</h3>
+        <ul>
+          <li>☐ gRPC health check endpoint</li>
+          <li>☐ Prometheus metrics exported</li>
+          <li>☐ Structured logging with trace IDs</li>
+          <li>☐ OpenTelemetry tracing wired</li>
+          <li>☐ Kubernetes liveness/readiness probes</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Protocol</h3>
+        <ul>
+          <li>☐ Field numbers never changed</li>
+          <li>☐ Removed fields are reserved</li>
+          <li>☐ Proto files versioned in git</li>
+          <li>☐ Generated stubs committed</li>
+          <li>☐ Error codes used correctly</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Videos -->
+  <section class="video-section fade-in">
+    <h2>📺 Video Resources</h2>
+    <div class="video-grid">
+      <a href="https://www.youtube.com/watch?v=BXY1-BJc3js" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="BXY1-BJc3js"><img src="" alt="Python gRPC Connection"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">Building a gRPC Connection: Python Server &amp; Go Client Tutorial</div>
+          <div class="video-meta"><span class="video-tag">Production</span> Full gRPC connection walkthrough (2024)</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=E0CaocyNYKg" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="E0CaocyNYKg"><img src="" alt="gRPC Python Microservices"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">gRPC + Python + Microservices Complete Tutorial with Real-Life Use Case</div>
+          <div class="video-meta"><span class="video-tag">Complete</span> End-to-end Python gRPC microservice</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=Z_yD7YPL2oE" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="Z_yD7YPL2oE"><img src="" alt="gRPC Best Practices"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">Best Practices for gRPC Services</div>
+          <div class="video-meta"><span class="video-tag">Best Practices</span> Production gRPC patterns from Google</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Final Exercise -->
+  <section class="exercise-section fade-in" style="border-color:var(--success);border-width:2px;">
+    <h2>🏆 Final Challenge</h2>
+    <p class="exercise-subtitle">Complete the production system and verify everything works.</p>
+    <div class="exercise-tabs">
+      <button class="ex-tab active" data-target="ex10-q">Challenge</button>
+      <button class="ex-tab" data-target="ex10-a">Guidance</button>
+    </div>
+    <div id="ex10-q" class="ex-panel active">
+      <div class="exercise-task">
+        <h3>Build and run the complete mini system:</h3>
+        <p>
+          1. Generate TLS certificates for the cplane server<br/><br/>
+          2. Start the cplane server with TLS + JWT interceptor + metrics + health check<br/><br/>
+          3. Start TWO dplane clients (different client_ids, same cplane) in separate terminals<br/><br/>
+          4. Use grpcurl to push an API command to dplane-1 via a helper endpoint<br/><br/>
+          5. Verify: dplane-1 logs the command and sends a callback<br/><br/>
+          6. Kill the cplane server (Ctrl+C), wait, restart it<br/><br/>
+          7. Verify: both dplanes reconnect automatically with backoff logs<br/><br/>
+          8. Run <code>pytest tests/ -v</code> and verify all tests pass
+        </p>
+      </div>
+    </div>
+    <div id="ex10-a" class="ex-panel">
+      <div class="callout success">
+        <span class="callout-icon">✅</span>
+        <div class="callout-body">
+          <div class="callout-title">Guidance for the Final Challenge</div>
+          <div class="callout-text">
+            For step 4 (admin push), add a simple FastAPI endpoint to server.py that calls <code>push_api_command(client_id, path)</code> from Lesson 5. This admin HTTP endpoint lets you trigger commands without a separate gRPC tool.<br/><br/>
+            For steps 6-7 (reconnection test), watch the dplane logs — you should see "Server unavailable. Reconnect in 1.0s (attempt 1)", then "...2.0s (attempt 2)", etc. After cplane restarts and becomes healthy, the dplanes reconnect and reset their backoff counters.<br/><br/>
+            If you get <code>UNAVAILABLE</code> errors immediately even though the server is running, check that the port is not firewalled and the TLS cert CN matches the address you're connecting to.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div style="background:linear-gradient(135deg,#1e1b4b,#4f46e5);color:white;border-radius:var(--radius-lg);padding:48px;text-align:center;margin-bottom:32px;">
+    <div style="font-size:48px;margin-bottom:16px;">🎓</div>
+    <h2 style="font-size:32px;margin-bottom:12px;">Course Complete!</h2>
+    <p style="opacity:.9;max-width:600px;margin:0 auto 24px;">You've mastered gRPC from Protocol Buffers to production-grade bidirectional streaming. You now understand every part of FlowGenX's cplane↔dplane architecture.</p>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+      <a href="lesson-01.html" style="background:rgba(255,255,255,.2);color:white;text-decoration:none;padding:10px 20px;border-radius:var(--radius);font-weight:600;border:1px solid rgba(255,255,255,.3);">Review from start</a>
+      <a href="index.html" style="background:white;color:var(--primary);text-decoration:none;padding:10px 20px;border-radius:var(--radius);font-weight:600;">View all lessons</a>
+    </div>
+  </div>
+
+  <div style="text-align:center;margin-bottom:32px;">
+    <button class="complete-btn" data-lesson="10">✓ Mark Lesson 10 Complete</button>
+  </div>
+  <div class="completion-banner" data-lesson="10">
+    <h2>🏆 All 10 Lessons Complete!</h2>
+    <p>You are now a gRPC practitioner. Go build production systems.</p>
+  </div>
+
+  <div class="lesson-nav">
+    <a href="lesson-09.html" class="lesson-nav-btn btn-prev">← Lesson 9: Observability</a>
+    <a href="index.html" class="lesson-nav-btn btn-home">🏠 Course Home</a>
+  </div>
+
+</div></main>
+<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · Built for FlowGenX B2B Deployment · <a href="https://grpc.io" target="_blank">grpc.io</a></p></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

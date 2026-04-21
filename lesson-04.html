@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lesson 4: Unary RPC | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links"><a href="index.html" class="nav-link">← All Lessons</a></div>
+    <div class="nav-progress-wrap"><span class="nav-progress-count">0/10</span><div class="nav-progress-bar"><div class="nav-progress-fill"></div></div></div>
+  </div>
+</nav>
+
+<header class="lesson-hero">
+  <div class="container">
+    <div class="lesson-badge">Lesson 4 of 10 · Intermediate</div>
+    <h1>Unary RPC</h1>
+    <p class="lesson-subtitle">Build your first real gRPC server and client in Python. Implement the RegisterClient RPC — the handshake that every dplane performs when connecting to the cplane.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">⏱ 60 min</span>
+      <span class="lesson-meta-item">🐍 Python gRPC</span>
+      <span class="lesson-meta-item">📁 Creates: server.py + client.py</span>
+    </div>
+  </div>
+</header>
+
+<main><div class="container">
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🏗️</span> The Three Core Concepts</h2>
+    <p>To build a gRPC service you need to understand three things:</p>
+
+    <div class="rpc-grid">
+      <div class="rpc-card">
+        <div class="rpc-icon">🔗</div>
+        <div class="rpc-name">Channel</div>
+        <div class="rpc-desc">The client's connection to the server. Holds the address, credentials, and connection pool. Think of it as a "connection factory".</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">📟</div>
+        <div class="rpc-name">Stub</div>
+        <div class="rpc-desc">The client-side proxy. Created from a channel. Has one method per RPC. Calling stub.RegisterClient() sends a gRPC request.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">🖥️</div>
+        <div class="rpc-name">Servicer</div>
+        <div class="rpc-desc">The server-side implementation. You subclass the generated Servicer class and override one method per RPC with your logic.</div>
+      </div>
+    </div>
+
+    <div class="arch-diagram">
+      <p style="font-weight:700;margin-bottom:20px;">Unary RPC Request Flow</p>
+      <div class="arch-flow">
+        <div style="text-align:center;">
+          <div class="arch-box cyan">dplane Client</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">stub.RegisterClient(req)</div>
+        </div>
+        <div class="arch-arrow">
+          →
+          <span>protobuf bytes<br/>over HTTP/2</span>
+        </div>
+        <div style="text-align:center;">
+          <div class="arch-box primary">cplane Server</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">RegisterClient(req, ctx)</div>
+        </div>
+        <div class="arch-arrow">
+          ←
+          <span>RegisterResponse</span>
+        </div>
+        <div style="text-align:center;">
+          <div class="arch-box cyan">dplane Client</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">response.session_id</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🖥️</span> Building the Server (Servicer)</h2>
+    <p>The server extends the generated <code>ControlPlaneServicer</code> and overrides each RPC method. The <code>context</code> parameter gives you metadata, peer info, and the ability to abort with error codes.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">grpc-demo/cplane/server.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import grpc
+import uuid
+import logging
+from concurrent import futures
+from datetime import datetime
+
+import sys
+sys.path.insert(0, '../proto')
+import cplane_pb2
+import cplane_pb2_grpc
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
+
+# In-memory store of connected clients
+connected_clients = {}
+
+
+class ControlPlaneServicer(cplane_pb2_grpc.ControlPlaneServicer):
+    """Implements the ControlPlane gRPC service."""
+
+    def RegisterClient(self, request, context):
+        """Unary RPC: dplane registers with cplane."""
+        logger.info(f"RegisterClient called: client_id={request.client_id} tenant={request.tenant_id}")
+
+        # Validate required fields
+        if not request.client_id or not request.tenant_id:
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "client_id and tenant_id are required"
+            )
+
+        # Simple auth check (real auth in Lesson 8)
+        if not request.auth_token:
+            context.abort(grpc.StatusCode.UNAUTHENTICATED, "auth_token is required")
+
+        # Register the client
+        session_id = str(uuid.uuid4())
+        connected_clients[request.client_id] = {
+            "tenant_id": request.tenant_id,
+            "session_id": session_id,
+            "registered_at": datetime.utcnow().isoformat(),
+            "version": request.version,
+        }
+
+        logger.info(f"Client registered: {request.client_id} → session={session_id}")
+        return cplane_pb2.RegisterResponse(
+            success=True,
+            session_id=session_id,
+            message=f"Welcome, {request.client_id}!"
+        )
+
+    def GetClientStatus(self, request, context):
+        """Unary RPC: get current status of a connected client."""
+        client = connected_clients.get(request.client_id)
+        if not client:
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Client {request.client_id} not found")
+
+        return cplane_pb2.GetStatusResponse(
+            client_id=request.client_id,
+            status=cplane_pb2.ACTIVE,
+        )
+
+    def StreamMessages(self, request_iterator, context):
+        """Bidirectional streaming RPC — implemented in Lesson 5."""
+        context.abort(grpc.StatusCode.UNIMPLEMENTED, "StreamMessages will be added in Lesson 5")
+
+
+def serve(port=50051):
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    cplane_pb2_grpc.add_ControlPlaneServicer_to_server(ControlPlaneServicer(), server)
+    server.add_insecure_port(f'[::]:{port}')
+    server.start()
+    logger.info(f"cplane gRPC server started on port {port}")
+    server.wait_for_termination()
+
+
+if __name__ == '__main__':
+    serve()
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📟</span> Building the Client (Stub)</h2>
+    <p>The client creates a channel to the server's address, then creates a stub from that channel. Each RPC is just a method call on the stub.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">grpc-demo/dplane/client.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import grpc
+import logging
+import sys
+
+sys.path.insert(0, '../proto')
+import cplane_pb2
+import cplane_pb2_grpc
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
+
+
+class DPlaneClient:
+    def __init__(self, server_address='localhost:50051'):
+        self.server_address = server_address
+        self.channel = None
+        self.stub = None
+        self.session_id = None
+
+    def connect(self):
+        """Create the gRPC channel and stub."""
+        # insecure_channel = no TLS (development only, see Lesson 8 for TLS)
+        self.channel = grpc.insecure_channel(self.server_address)
+        self.stub = cplane_pb2_grpc.ControlPlaneStub(self.channel)
+        logger.info(f"Channel created to {self.server_address}")
+
+    def register(self, client_id, tenant_id, auth_token, version="1.0.0"):
+        """Call RegisterClient RPC."""
+        request = cplane_pb2.RegisterRequest(
+            client_id=client_id,
+            tenant_id=tenant_id,
+            auth_token=auth_token,
+            version=version,
+        )
+        request.capabilities["streaming"] = "true"
+        request.capabilities["version"] = version
+
+        try:
+            response = self.stub.RegisterClient(request)
+            if response.success:
+                self.session_id = response.session_id
+                logger.info(f"Registered! session_id={self.session_id}")
+            return response
+        except grpc.RpcError as e:
+            logger.error(f"RegisterClient failed: code={e.code()} details={e.details()}")
+            raise
+
+    def get_status(self, client_id):
+        """Call GetClientStatus RPC."""
+        request = cplane_pb2.GetStatusRequest(
+            client_id=client_id,
+            session_id=self.session_id or "",
+        )
+        try:
+            return self.stub.GetClientStatus(request)
+        except grpc.RpcError as e:
+            logger.error(f"GetClientStatus failed: {e.code()} {e.details()}")
+            raise
+
+    def close(self):
+        if self.channel:
+            self.channel.close()
+            logger.info("Channel closed")
+
+
+def main():
+    client = DPlaneClient('localhost:50051')
+    client.connect()
+
+    # Register
+    resp = client.register(
+        client_id="dplane-tenant-abc-001",
+        tenant_id="tenant-abc",
+        auth_token="secret-token-123",
+        version="2.1.0"
+    )
+    print(f"Registration: success={resp.success}, session={resp.session_id}")
+
+    # Get status
+    status = client.get_status("dplane-tenant-abc-001")
+    print(f"Status: client_id={status.client_id}, status={status.status}")
+
+    client.close()
+
+
+if __name__ == '__main__':
+    main()
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">▶️</span> Running the Demo</h2>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Terminal 1 — Start server</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash">cd grpc-demo/cplane
+python server.py
+# Output: cplane gRPC server started on port 50051</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Terminal 2 — Run client</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash">cd grpc-demo/dplane
+python client.py
+# Output:
+# Channel created to localhost:50051
+# Registered! session_id=f47ac10b-58cc-4372-a567-0e02b2c3d479
+# Registration: success=True, session=f47ac10b-...
+# Status: client_id=dplane-tenant-abc-001, status=0</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📊</span> gRPC Status Codes</h2>
+    <p>gRPC uses its own status codes (not HTTP status codes). These are used in <code>context.abort(code, message)</code> on the server and caught as <code>grpc.RpcError</code> on the client:</p>
+
+    <div class="status-grid">
+      <div class="status-item ok"><div class="status-code">grpc.StatusCode.OK</div><div class="status-name">OK</div><div class="status-desc">Success</div></div>
+      <div class="status-item error"><div class="status-code">INVALID_ARGUMENT</div><div class="status-name">Invalid Argument</div><div class="status-desc">Bad request data</div></div>
+      <div class="status-item error"><div class="status-code">NOT_FOUND</div><div class="status-name">Not Found</div><div class="status-desc">Resource doesn't exist</div></div>
+      <div class="status-item error"><div class="status-code">UNAUTHENTICATED</div><div class="status-name">Unauthenticated</div><div class="status-desc">Missing/invalid credentials</div></div>
+      <div class="status-item error"><div class="status-code">PERMISSION_DENIED</div><div class="status-name">Permission Denied</div><div class="status-desc">Authenticated but not authorized</div></div>
+      <div class="status-item warn"><div class="status-code">DEADLINE_EXCEEDED</div><div class="status-name">Deadline Exceeded</div><div class="status-desc">Request took too long</div></div>
+      <div class="status-item warn"><div class="status-code">UNAVAILABLE</div><div class="status-name">Unavailable</div><div class="status-desc">Server temporarily down — retry</div></div>
+      <div class="status-item error"><div class="status-code">UNIMPLEMENTED</div><div class="status-name">Unimplemented</div><div class="status-desc">RPC not implemented yet</div></div>
+      <div class="status-item error"><div class="status-code">INTERNAL</div><div class="status-name">Internal</div><div class="status-desc">Server-side error</div></div>
+      <div class="status-item warn"><div class="status-code">ALREADY_EXISTS</div><div class="status-name">Already Exists</div><div class="status-desc">Duplicate resource</div></div>
+    </div>
+  </section>
+
+  <!-- Videos -->
+  <section class="video-section fade-in">
+    <h2>📺 Video Resources</h2>
+    <div class="video-grid">
+      <a href="https://www.youtube.com/watch?v=WB37L7PjI5k" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="WB37L7PjI5k"><img src="" alt="Python gRPC Tutorial"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">Python gRPC Tutorial — Client and Server with Various RPC Types</div>
+          <div class="video-meta"><span class="video-tag">Python</span> Comprehensive Python gRPC walkthrough</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=LMayfVre-ik" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="LMayfVre-ik"><img src="" alt="Hello World gRPC"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">gRPC Project Tutorial — Hello World, Connecting Client and Server</div>
+          <div class="video-meta"><span class="video-tag">Beginner</span> First gRPC project from scratch</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=E0CaocyNYKg" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="E0CaocyNYKg"><img src="" alt="gRPC Python Microservices"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">gRPC + Python + Microservices — Complete Tutorial with Real-Life Use Case</div>
+          <div class="video-meta"><span class="video-tag">Real World</span> Production-like Python gRPC</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Exercise -->
+  <section class="exercise-section fade-in">
+    <h2>💪 Exercise</h2>
+    <p class="exercise-subtitle">Extend the server with a new RPC.</p>
+    <div class="exercise-tabs">
+      <button class="ex-tab active" data-target="ex4-q">Task</button>
+      <button class="ex-tab" data-target="ex4-a">Solution</button>
+    </div>
+    <div id="ex4-q" class="ex-panel active">
+      <div class="exercise-task">
+        <h3>Add a DeregisterClient RPC:</h3>
+        <p>
+          1. Add <code>DeregisterRequest</code> (client_id, session_id) and <code>DeregisterResponse</code> (success, message) to the proto<br/><br/>
+          2. Add <code>rpc DeregisterClient</code> to the ControlPlane service<br/><br/>
+          3. Implement <code>DeregisterClient</code> in the server — remove the client from <code>connected_clients</code><br/><br/>
+          4. Call it from the client after getting status, then verify it fails on a second call
+        </p>
+      </div>
+    </div>
+    <div id="ex4-a" class="ex-panel">
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Server implementation</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">def DeregisterClient(self, request, context):
+    client = connected_clients.get(request.client_id)
+    if not client:
+        context.abort(grpc.StatusCode.NOT_FOUND,
+                      f"Client {request.client_id} not found")
+
+    if client["session_id"] != request.session_id:
+        context.abort(grpc.StatusCode.PERMISSION_DENIED,
+                      "Invalid session_id")
+
+    del connected_clients[request.client_id]
+    logger.info(f"Client deregistered: {request.client_id}")
+    return cplane_pb2.DeregisterResponse(
+        success=True,
+        message=f"Client {request.client_id} deregistered"
+    )
+</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <div style="text-align:center;margin-bottom:32px;">
+    <button class="complete-btn" data-lesson="4">✓ Mark Lesson 4 Complete</button>
+  </div>
+  <div class="completion-banner" data-lesson="4">
+    <h2>🎉 Lesson 4 Complete!</h2>
+    <p>You've built a real gRPC server and client! The hardest part is behind you. Next: add streaming — the feature that makes gRPC truly special.</p>
+  </div>
+  <div class="lesson-nav">
+    <a href="lesson-03.html" class="lesson-nav-btn btn-prev">← Lesson 3: Advanced Proto3</a>
+    <a href="lesson-05.html" class="lesson-nav-btn btn-next">Lesson 5: Streaming Patterns →</a>
+  </div>
+
+</div></main>
+<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · <a href="https://grpc.io/docs/languages/python/basics/" target="_blank">gRPC Python Basics</a></p></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

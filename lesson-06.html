@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lesson 6: Error Handling | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links"><a href="index.html" class="nav-link">← All Lessons</a></div>
+    <div class="nav-progress-wrap"><span class="nav-progress-count">0/10</span><div class="nav-progress-bar"><div class="nav-progress-fill"></div></div></div>
+  </div>
+</nav>
+
+<header class="lesson-hero">
+  <div class="container">
+    <div class="lesson-badge">Lesson 6 of 10 · Intermediate</div>
+    <h1>Error Handling</h1>
+    <p class="lesson-subtitle">Master gRPC status codes, structured error responses, the rich error model with google.rpc.Status, and how to handle errors gracefully on both sides.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">⏱ 50 min</span>
+      <span class="lesson-meta-item">🛡️ Robust code</span>
+      <span class="lesson-meta-item">📁 Adds error handling</span>
+    </div>
+  </div>
+</header>
+
+<main><div class="container">
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">⚠️</span> gRPC Error Model</h2>
+    <p>gRPC has a richer error model than HTTP. Every RPC call completes with a <strong>status</strong> — either <code>OK</code> or one of 16 error codes. Each error can carry a <strong>message string</strong> and optional <strong>structured details</strong>.</p>
+
+    <div class="arch-diagram">
+      <p style="font-weight:700;margin-bottom:16px;">gRPC Error Propagation</p>
+      <div class="arch-flow">
+        <div class="arch-box cyan">dplane Client</div>
+        <div class="arch-arrow">→ request →</div>
+        <div class="arch-box primary">cplane Server</div>
+        <div class="arch-arrow">← StatusCode +<br>message + details ←</div>
+        <div class="arch-box">grpc.RpcError</div>
+      </div>
+    </div>
+
+    <h3>Three layers of error information:</h3>
+    <div class="rpc-grid">
+      <div class="rpc-card">
+        <div class="rpc-icon">🔢</div>
+        <div class="rpc-name">Status Code</div>
+        <div class="rpc-desc">One of 16 standardized codes (INVALID_ARGUMENT, NOT_FOUND, UNAUTHENTICATED...). Machine-readable.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">💬</div>
+        <div class="rpc-name">Error Message</div>
+        <div class="rpc-desc">Human-readable string. e.g. "client_id is required". Not for programmatic parsing.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">📋</div>
+        <div class="rpc-name">Error Details</div>
+        <div class="rpc-desc">Structured proto messages: BadRequest, ErrorInfo, RetryInfo, DebugInfo. Rich, parseable details.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🖥️</span> Server-Side: Raising Errors</h2>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Simple abort</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">def RegisterClient(self, request, context):
+    # Simple abort — code + message
+    if not request.client_id:
+        context.abort(
+            grpc.StatusCode.INVALID_ARGUMENT,
+            "client_id is required and cannot be empty"
+        )
+
+    if request.client_id in banned_clients:
+        context.abort(
+            grpc.StatusCode.PERMISSION_DENIED,
+            f"Client {request.client_id} is banned"
+        )
+
+    # Catch unexpected errors and return INTERNAL
+    try:
+        result = do_registration(request)
+        return result
+    except DatabaseError as e:
+        context.abort(grpc.StatusCode.INTERNAL, f"Database error: {str(e)}")
+</code></pre>
+    </div>
+
+    <h3>Rich Error Details with google.rpc.Status</h3>
+    <p>Install <code>pip install grpcio-status googleapis-common-protos</code> to use the rich error model:</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Rich error with field violations</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">from grpc_status import rpc_status
+from google.rpc import status_pb2, code_pb2, error_details_pb2
+
+def RegisterClient(self, request, context):
+    # Collect validation errors
+    violations = []
+    if not request.client_id:
+        violations.append(
+            error_details_pb2.BadRequest.FieldViolation(
+                field="client_id",
+                description="client_id cannot be empty"
+            )
+        )
+    if not request.tenant_id:
+        violations.append(
+            error_details_pb2.BadRequest.FieldViolation(
+                field="tenant_id",
+                description="tenant_id is required"
+            )
+        )
+
+    if violations:
+        bad_request = error_details_pb2.BadRequest(field_violations=violations)
+        rich_status = status_pb2.Status(
+            code=code_pb2.INVALID_ARGUMENT,
+            message="Request validation failed",
+        )
+        rich_status.details.add().Pack(bad_request)
+
+        context.abort_with_status(rpc_status.to_status(rich_status))
+
+    return cplane_pb2.RegisterResponse(success=True, session_id="abc")
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📟</span> Client-Side: Catching Errors</h2>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Handling gRPC errors</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">from grpc_status import rpc_status
+from google.rpc import error_details_pb2
+
+def register_with_error_handling(stub, request):
+    try:
+        response = stub.RegisterClient(request)
+        return response
+
+    except grpc.RpcError as e:
+        code = e.code()
+        message = e.details()
+
+        if code == grpc.StatusCode.INVALID_ARGUMENT:
+            # Try to extract rich error details
+            status = rpc_status.from_call(e)
+            if status:
+                for detail in status.details:
+                    if detail.Is(error_details_pb2.BadRequest.DESCRIPTOR):
+                        bad_req = error_details_pb2.BadRequest()
+                        detail.Unpack(bad_req)
+                        for v in bad_req.field_violations:
+                            print(f"  Field '{v.field}': {v.description}")
+            raise ValueError(f"Invalid request: {message}")
+
+        elif code == grpc.StatusCode.UNAUTHENTICATED:
+            raise PermissionError("Authentication failed — check your auth_token")
+
+        elif code == grpc.StatusCode.UNAVAILABLE:
+            print("Server unavailable, will retry...")
+            raise  # let caller handle retry
+
+        elif code == grpc.StatusCode.DEADLINE_EXCEEDED:
+            raise TimeoutError(f"RegisterClient timed out")
+
+        else:
+            raise RuntimeError(f"gRPC error {code}: {message}")
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔄</span> Error Handling in Streaming</h2>
+    <p>Streaming errors are slightly different — the error arrives when the iterator is exhausted or raises:</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Streaming error handling</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">def start_streaming(self):
+    try:
+        stream = self.stub.StreamMessages(
+            self._message_generator(),
+            timeout=None  # keep alive indefinitely
+        )
+        for server_msg in stream:
+            self._handle_server_message(server_msg)
+
+    except grpc.RpcError as e:
+        code = e.code()
+
+        if code == grpc.StatusCode.CANCELLED:
+            logger.info("Stream cancelled by server (graceful shutdown)")
+
+        elif code == grpc.StatusCode.UNAVAILABLE:
+            logger.warning("Server unavailable — will reconnect")
+            # trigger reconnection (see Lesson 10)
+            self._schedule_reconnect()
+
+        elif code == grpc.StatusCode.UNAUTHENTICATED:
+            logger.error("Auth expired — need to re-register")
+            # refresh token and re-register
+            self._refresh_and_reconnect()
+
+        else:
+            logger.error(f"Stream error {code}: {e.details()}")
+
+    finally:
+        logger.info("Stream ended")
+</code></pre>
+    </div>
+
+    <div class="callout warning">
+      <span class="callout-icon">⚠️</span>
+      <div class="callout-body">
+        <div class="callout-title">UNAVAILABLE is retryable — others are not</div>
+        <div class="callout-text"><code>UNAVAILABLE</code> means a transient failure — retry with backoff. <code>UNAUTHENTICATED</code> means you need to fix credentials first. <code>INVALID_ARGUMENT</code> means your code is wrong — retrying won't help. <code>CANCELLED</code> means server shut down gracefully — reconnect after a delay.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔢</span> Complete Status Code Reference</h2>
+    <div class="status-grid">
+      <div class="status-item ok"><div class="status-code">OK (0)</div><div class="status-name">Success</div><div class="status-desc">Request completed successfully</div></div>
+      <div class="status-item warn"><div class="status-code">CANCELLED (1)</div><div class="status-name">Cancelled</div><div class="status-desc">Client cancelled the request</div></div>
+      <div class="status-item error"><div class="status-code">UNKNOWN (2)</div><div class="status-name">Unknown</div><div class="status-desc">Unknown server error</div></div>
+      <div class="status-item error"><div class="status-code">INVALID_ARGUMENT (3)</div><div class="status-name">Invalid Argument</div><div class="status-desc">Bad request fields. Don't retry.</div></div>
+      <div class="status-item warn"><div class="status-code">DEADLINE_EXCEEDED (4)</div><div class="status-name">Deadline Exceeded</div><div class="status-desc">Timeout. May retry.</div></div>
+      <div class="status-item error"><div class="status-code">NOT_FOUND (5)</div><div class="status-name">Not Found</div><div class="status-desc">Resource not found</div></div>
+      <div class="status-item error"><div class="status-code">ALREADY_EXISTS (6)</div><div class="status-name">Already Exists</div><div class="status-desc">Duplicate creation attempt</div></div>
+      <div class="status-item error"><div class="status-code">PERMISSION_DENIED (7)</div><div class="status-name">Permission Denied</div><div class="status-desc">Authorized but not allowed</div></div>
+      <div class="status-item error"><div class="status-code">RESOURCE_EXHAUSTED (8)</div><div class="status-name">Resource Exhausted</div><div class="status-desc">Rate limit exceeded. Retry after delay.</div></div>
+      <div class="status-item error"><div class="status-code">UNAUTHENTICATED (16)</div><div class="status-name">Unauthenticated</div><div class="status-desc">Missing/invalid credentials</div></div>
+      <div class="status-item warn"><div class="status-code">UNAVAILABLE (14)</div><div class="status-name">Unavailable</div><div class="status-desc">Server down. Retry with backoff.</div></div>
+      <div class="status-item error"><div class="status-code">INTERNAL (13)</div><div class="status-name">Internal</div><div class="status-desc">Server bug. Don't retry.</div></div>
+    </div>
+  </section>
+
+  <!-- Videos -->
+  <section class="video-section fade-in">
+    <h2>📺 Video Resources</h2>
+    <div class="video-grid">
+      <a href="https://www.youtube.com/watch?v=9QS33m8vnag" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="9QS33m8vnag"><img src="" alt="gRPC Error messages"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">gRPC Error Messages in Unary RPCs</div>
+          <div class="video-meta"><span class="video-tag">Error Handling</span> Concepts and implementation</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=IT4OfN27D4c" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="IT4OfN27D4c"><img src="" alt="gRPC Error streaming"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">gRPC Error Handling in Bidirectional Streams</div>
+          <div class="video-meta"><span class="video-tag">Streaming</span> Errors in streaming RPCs</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=g44zR3cyC-I" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="g44zR3cyC-I"><img src="" alt="gRPC Error Examples"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">Yes, No, Maybe? Error Handling with gRPC Examples</div>
+          <div class="video-meta"><span class="video-tag">Best Practices</span> SREcon talk on gRPC errors</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Exercise -->
+  <section class="exercise-section fade-in">
+    <h2>💪 Exercise</h2>
+    <p class="exercise-subtitle">Add comprehensive error handling to RegisterClient.</p>
+    <div class="exercise-tabs">
+      <button class="ex-tab active" data-target="ex6-q">Task</button>
+      <button class="ex-tab" data-target="ex6-a">Solution</button>
+    </div>
+    <div id="ex6-q" class="ex-panel active">
+      <div class="exercise-task">
+        <h3>Implement robust error handling:</h3>
+        <p>
+          1. Server: validate that <code>version</code> matches the format <code>X.Y.Z</code> (regex check), return <code>INVALID_ARGUMENT</code> with a <code>BadRequest.FieldViolation</code> if not<br/><br/>
+          2. Server: if a client tries to register twice with same <code>client_id</code>, return <code>ALREADY_EXISTS</code><br/><br/>
+          3. Client: catch <code>ALREADY_EXISTS</code> and log a warning instead of raising an exception (it just means we're already connected)<br/><br/>
+          4. Client: catch <code>UNAVAILABLE</code> and retry up to 3 times with a 2-second sleep between attempts
+        </p>
+      </div>
+    </div>
+    <div id="ex6-a" class="ex-panel">
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Solution</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">import re, time
+
+# Server
+def RegisterClient(self, request, context):
+    # Validate version format
+    if request.version and not re.match(r'^\d+\.\d+\.\d+$', request.version):
+        context.abort(grpc.StatusCode.INVALID_ARGUMENT,
+                      "version must be in format X.Y.Z (e.g. 2.1.0)")
+
+    # Check for duplicate
+    if request.client_id in connected_clients:
+        context.abort(grpc.StatusCode.ALREADY_EXISTS,
+                      f"Client {request.client_id} is already registered")
+
+    # ... rest of registration
+
+
+# Client
+def register_with_retry(stub, request, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return stub.RegisterClient(request)
+        except grpc.RpcError as e:
+            if e.code() == grpc.StatusCode.ALREADY_EXISTS:
+                logger.warning(f"Already registered: {e.details()}")
+                return None  # treat as success
+            elif e.code() == grpc.StatusCode.UNAVAILABLE:
+                if attempt < max_retries - 1:
+                    logger.info(f"Unavailable, retry {attempt+1}/{max_retries}")
+                    time.sleep(2)
+                    continue
+            raise
+</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <div style="text-align:center;margin-bottom:32px;">
+    <button class="complete-btn" data-lesson="6">✓ Mark Lesson 6 Complete</button>
+  </div>
+  <div class="completion-banner" data-lesson="6">
+    <h2>🎉 Lesson 6 Complete!</h2>
+    <p>Your gRPC service now handles errors properly. Next: add middleware with interceptors, request tracing, and deadline enforcement.</p>
+  </div>
+  <div class="lesson-nav">
+    <a href="lesson-05.html" class="lesson-nav-btn btn-prev">← Lesson 5: Streaming</a>
+    <a href="lesson-07.html" class="lesson-nav-btn btn-next">Lesson 7: Interceptors →</a>
+  </div>
+
+</div></main>
+<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · <a href="https://grpc.io/docs/guides/error/" target="_blank">gRPC Error Guide</a></p></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

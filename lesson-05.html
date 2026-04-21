@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lesson 5: Streaming Patterns | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links"><a href="index.html" class="nav-link">← All Lessons</a></div>
+    <div class="nav-progress-wrap"><span class="nav-progress-count">0/10</span><div class="nav-progress-bar"><div class="nav-progress-fill"></div></div></div>
+  </div>
+</nav>
+
+<header class="lesson-hero">
+  <div class="container">
+    <div class="lesson-badge">Lesson 5 of 10 · Intermediate</div>
+    <h1>Streaming Patterns</h1>
+    <p class="lesson-subtitle">Implement all four RPC types — unary, server streaming, client streaming, and bidirectional. Build the StreamMessages RPC that keeps your dplane permanently connected to the cplane.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">⏱ 75 min</span>
+      <span class="lesson-meta-item">🌊 4 RPC types</span>
+      <span class="lesson-meta-item">📁 Key: StreamMessages</span>
+    </div>
+  </div>
+</header>
+
+<main><div class="container">
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📡</span> 4 RPC Types — The Full Picture</h2>
+
+    <div class="rpc-grid">
+      <div class="rpc-card">
+        <div class="rpc-icon">↔️</div>
+        <div class="rpc-name">Unary</div>
+        <div class="rpc-desc"><code>rpc Foo(Req) returns (Res)</code><br/>One req → one res. Done in Lesson 4.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">📤</div>
+        <div class="rpc-name">Server Streaming</div>
+        <div class="rpc-desc"><code>rpc Foo(Req) returns (stream Res)</code><br/>One req → many res (server yields).</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">📥</div>
+        <div class="rpc-name">Client Streaming</div>
+        <div class="rpc-desc"><code>rpc Foo(stream Req) returns (Res)</code><br/>Many req (iterator) → one res.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">🔄</div>
+        <div class="rpc-name">Bidirectional</div>
+        <div class="rpc-desc"><code>rpc Foo(stream Req) returns (stream Res)</code><br/>Many req ↔ many res. Full duplex.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📤</span> Server Streaming</h2>
+    <p>The server yields multiple responses for a single request. The client iterates over them like a Python iterator.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Server — yields responses</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">def ListConnectors(self, request, context):
+    """Server streams connector info back to client."""
+    connectors = ["postgres", "mysql", "s3", "salesforce", "snowflake"]
+    for conn in connectors:
+        if context.is_active():  # check client is still listening
+            yield cplane_pb2.ConnectorInfo(
+                name=conn,
+                status="available"
+            )
+        else:
+            break  # client disconnected</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Client — iterates responses</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">request = cplane_pb2.ListRequest(tenant_id="tenant-abc")
+for connector in stub.ListConnectors(request):
+    print(f"Connector: {connector.name} ({connector.status})")</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📥</span> Client Streaming</h2>
+    <p>The client sends a sequence of messages; the server reads all of them and returns one final response.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Server — reads request_iterator</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">def UploadLogs(self, request_iterator, context):
+    """Client streams log entries; server returns summary."""
+    count = 0
+    for log_entry in request_iterator:
+        # Process each log entry as it arrives
+        logger.info(f"Log: {log_entry.message}")
+        count += 1
+    return cplane_pb2.UploadResponse(
+        success=True,
+        message=f"Received {count} log entries"
+    )</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Client — generator sends messages</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">def log_generator():
+    for i in range(100):
+        yield cplane_pb2.LogEntry(
+            message=f"Log line {i}",
+            level="INFO",
+            timestamp=int(time.time())
+        )
+
+response = stub.UploadLogs(log_generator())
+print(response.message)  # "Received 100 log entries"</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔄</span> Bidirectional Streaming — The Key Pattern</h2>
+    <p>Both sides send and receive independently. This is how <code>StreamMessages</code> works in your cplane — the dplane holds a persistent connection and both sides can send at any time.</p>
+
+    <div class="callout architecture">
+      <span class="callout-icon">🔮</span>
+      <div class="callout-body">
+        <div class="callout-title">This IS your production StreamMessages</div>
+        <div class="callout-text">In <code>deployed/cplane/flowgenx_cp_grpc_server/</code>, the <code>StreamMessages</code> bidirectional RPC is the core connection between cplane and each dplane. The dplane sends heartbeats and callback results. The cplane sends API commands. One persistent stream handles all of it.</div>
+      </div>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">grpc-demo/cplane/server.py — StreamMessages</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import queue
+import threading
+import uuid
+from google.protobuf.timestamp_pb2 import Timestamp
+from datetime import datetime, timezone
+
+# Per-client outbound queue: server → dplane
+client_queues = {}
+
+class ControlPlaneServicer(cplane_pb2_grpc.ControlPlaneServicer):
+
+    def StreamMessages(self, request_iterator, context):
+        """
+        Bidirectional streaming RPC.
+        - Reads messages FROM the dplane (request_iterator)
+        - Yields messages TO the dplane (via outbound queue)
+        Both happen concurrently in separate threads.
+        """
+        client_id = None
+        outbound_q = queue.Queue()
+
+        def read_from_client():
+            """Thread: reads messages from the dplane."""
+            nonlocal client_id
+            try:
+                for msg in request_iterator:
+                    client_id = msg.client_id
+
+                    # Register the client's outbound queue
+                    if client_id and client_id not in client_queues:
+                        client_queues[client_id] = outbound_q
+                        logger.info(f"Stream opened: {client_id}")
+
+                    if msg.type == cplane_pb2.HEARTBEAT:
+                        logger.debug(f"Heartbeat from {client_id}")
+                        # Echo heartbeat back
+                        outbound_q.put(cplane_pb2.ServerMessage(
+                            message_id=str(uuid.uuid4()),
+                            type=cplane_pb2.HEARTBEAT,
+                        ))
+
+                    elif msg.WhichOneof('payload') == 'callback_payload':
+                        cb = msg.callback_payload
+                        logger.info(f"Callback from {client_id}: req={cb.request_id} success={cb.success}")
+
+            except grpc.RpcError:
+                pass  # client disconnected
+            finally:
+                if client_id and client_id in client_queues:
+                    del client_queues[client_id]
+                    logger.info(f"Stream closed: {client_id}")
+                outbound_q.put(None)  # signal sender to stop
+
+        # Start reader thread
+        reader = threading.Thread(target=read_from_client, daemon=True)
+        reader.start()
+
+        # Main thread: yield messages from the outbound queue
+        while context.is_active():
+            try:
+                msg = outbound_q.get(timeout=1.0)
+                if msg is None:
+                    break
+                yield msg
+            except queue.Empty:
+                continue
+
+        reader.join(timeout=2)
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">grpc-demo/dplane/client.py — stream_messages</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import queue
+import threading
+import time
+import uuid
+from google.protobuf.timestamp_pb2 import Timestamp
+from datetime import datetime, timezone
+
+
+class DPlaneClient:
+    def __init__(self, server_address='localhost:50051', client_id='dplane-1'):
+        self.server_address = server_address
+        self.client_id = client_id
+        self.channel = None
+        self.stub = None
+        self.session_id = None
+        self._send_queue = queue.Queue()
+        self._running = False
+
+    def connect(self):
+        self.channel = grpc.insecure_channel(self.server_address)
+        self.stub = cplane_pb2_grpc.ControlPlaneStub(self.channel)
+
+    def _message_generator(self):
+        """Generator: yields messages from the send queue."""
+        while self._running:
+            try:
+                msg = self._send_queue.get(timeout=1.0)
+                if msg is None:
+                    break
+                yield msg
+            except queue.Empty:
+                continue
+
+    def send_heartbeat(self):
+        """Put a heartbeat into the send queue."""
+        ts = Timestamp()
+        ts.FromDatetime(datetime.now(timezone.utc))
+        self._send_queue.put(cplane_pb2.ClientMessage(
+            message_id=str(uuid.uuid4()),
+            type=cplane_pb2.HEARTBEAT,
+            client_id=self.client_id,
+            sent_at=ts,
+        ))
+
+    def send_callback(self, request_id, result, success=True):
+        """Send a callback response to the cplane."""
+        self._send_queue.put(cplane_pb2.ClientMessage(
+            message_id=str(uuid.uuid4()),
+            type=cplane_pb2.RESPONSE,
+            client_id=self.client_id,
+            callback_payload=cplane_pb2.CallbackPayload(
+                request_id=request_id,
+                result=result,
+                success=success,
+            )
+        ))
+
+    def start_streaming(self):
+        """Start the bidirectional stream and process incoming server messages."""
+        self._running = True
+
+        def _heartbeat_loop():
+            while self._running:
+                self.send_heartbeat()
+                time.sleep(5)  # heartbeat every 5 seconds
+
+        # Start heartbeat thread
+        threading.Thread(target=_heartbeat_loop, daemon=True).start()
+
+        # Start the bidirectional stream
+        stream = self.stub.StreamMessages(self._message_generator())
+
+        try:
+            for server_msg in stream:
+                self._handle_server_message(server_msg)
+        except grpc.RpcError as e:
+            logger.error(f"Stream error: {e.code()} {e.details()}")
+        finally:
+            self._running = False
+
+    def _handle_server_message(self, msg):
+        """Process a message received from cplane."""
+        if msg.type == cplane_pb2.HEARTBEAT:
+            logger.debug("Heartbeat ACK from cplane")
+        elif msg.WhichOneof('payload') == 'api_payload':
+            api = msg.api_payload
+            logger.info(f"API command: {api.action} {api.path}")
+            # Execute the API call and send callback
+            result = f"executed {api.path}"
+            self.send_callback(msg.message_id, result, success=True)
+        else:
+            logger.info(f"Message from cplane: type={msg.type}")
+
+    def close(self):
+        self._running = False
+        self._send_queue.put(None)
+        if self.channel:
+            self.channel.close()
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔑</span> Key Streaming Rules</h2>
+
+    <table class="compare-table">
+      <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Always check <code>context.is_active()</code> in server loops</td><td>Client may disconnect at any time. Checking prevents writing to closed streams.</td></tr>
+        <tr><td>Use <code>queue.Queue</code> for thread-safe message passing</td><td>gRPC Python server is synchronous by default. Queues decouple reader and writer threads.</td></tr>
+        <tr><td>Never block <code>yield</code> with a long computation</td><td>Blocking the yield loop starves other messages. Push to a queue, yield asynchronously.</td></tr>
+        <tr><td>Generator must <code>return</code> (not raise) to cleanly close stream</td><td>Falling off the end of the generator closes the stream gracefully.</td></tr>
+        <tr><td>Handle <code>grpc.RpcError</code> in client stream loops</td><td>Server disconnect raises RpcError — catch it and reconnect (Lesson 10).</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Videos -->
+  <section class="video-section fade-in">
+    <h2>📺 Video Resources</h2>
+    <div class="video-grid">
+      <a href="https://www.youtube.com/watch?v=Bh7jG3dEqdQ" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="Bh7jG3dEqdQ"><img src="" alt="gRPC Bidirectional Python"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">Implement gRPC Simple and Bidirectional RPC in Python in 30 Minutes</div>
+          <div class="video-meta"><span class="video-tag">Bidirectional</span> Hands-on Python streaming</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=MT5tXSKa-KY" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="MT5tXSKa-KY"><img src="" alt="gRPC Bidirectional Streaming"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">gRPC Bidirectional Streaming — Part 2</div>
+          <div class="video-meta"><span class="video-tag">Deep Dive</span> Independent message streams</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=dQK0VLahrDk" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="dQK0VLahrDk"><img src="" alt="10000 messages gRPC"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">10,000 Messages in 2.18 Seconds with Python and gRPC</div>
+          <div class="video-meta"><span class="video-tag">Performance</span> High-throughput streaming benchmarks</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Exercise -->
+  <section class="exercise-section fade-in">
+    <h2>💪 Exercise</h2>
+    <p class="exercise-subtitle">Add a server-push mechanism to StreamMessages.</p>
+    <div class="exercise-tabs">
+      <button class="ex-tab active" data-target="ex5-q">Task</button>
+      <button class="ex-tab" data-target="ex5-a">Solution</button>
+    </div>
+    <div id="ex5-q" class="ex-panel active">
+      <div class="exercise-task">
+        <h3>Implement server-push from cplane to a connected dplane:</h3>
+        <p>
+          1. Write a function <code>push_api_command(client_id, path, action)</code> on the server that puts an <code>APIPayload</code> message into the client's outbound queue<br/><br/>
+          2. After registering, the client should receive the command and log it<br/><br/>
+          3. The client should call <code>send_callback()</code> with the result<br/><br/>
+          <em>Hint: use the <code>client_queues</code> dict from the server code above</em>
+        </p>
+      </div>
+    </div>
+    <div id="ex5-a" class="ex-panel">
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Server: push_api_command function</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">def push_api_command(client_id, path, action=cplane_pb2.POST):
+    """Push an API command to a connected dplane."""
+    q = client_queues.get(client_id)
+    if not q:
+        logger.warning(f"Client {client_id} not connected")
+        return False
+
+    msg = cplane_pb2.ServerMessage(
+        message_id=str(uuid.uuid4()),
+        type=cplane_pb2.API_REQUEST,
+        api_payload=cplane_pb2.APIPayload(
+            action=action,
+            path=path,
+            body='{"trigger": "manual"}',
+        )
+    )
+    q.put(msg)
+    logger.info(f"Pushed API command to {client_id}: {action} {path}")
+    return True
+
+# Call this after client connects (from a separate admin thread):
+# time.sleep(2)  # wait for stream to open
+# push_api_command("dplane-1", "/api/workflows/run")
+</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <div style="text-align:center;margin-bottom:32px;">
+    <button class="complete-btn" data-lesson="5">✓ Mark Lesson 5 Complete</button>
+  </div>
+  <div class="completion-banner" data-lesson="5">
+    <h2>🎉 Lesson 5 Complete!</h2>
+    <p>You've implemented bidirectional streaming — the heart of your cplane↔dplane system. Next: make it robust with proper error handling.</p>
+  </div>
+  <div class="lesson-nav">
+    <a href="lesson-04.html" class="lesson-nav-btn btn-prev">← Lesson 4: Unary RPC</a>
+    <a href="lesson-06.html" class="lesson-nav-btn btn-next">Lesson 6: Error Handling →</a>
+  </div>
+
+</div></main>
+<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · <a href="https://grpc.io/docs/what-is-grpc/core-concepts/#server-streaming-rpc" target="_blank">Streaming Concepts</a></p></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

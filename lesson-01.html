@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lesson 1: gRPC vs REST — The Why | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-link">← All Lessons</a>
+    </div>
+    <div class="nav-progress-wrap">
+      <span class="nav-progress-count">0/10</span>
+      <div class="nav-progress-bar"><div class="nav-progress-fill"></div></div>
+    </div>
+  </div>
+</nav>
+
+<header class="lesson-hero">
+  <div class="container">
+    <div class="lesson-badge">Lesson 1 of 10 · Beginner</div>
+    <h1>gRPC vs REST — The Why</h1>
+    <p class="lesson-subtitle">Understand why gRPC exists, what problems it solves over REST, and exactly why your FlowGenX cplane↔dplane architecture relies on it.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">⏱ 30 min</span>
+      <span class="lesson-meta-item">📖 Concepts only</span>
+      <span class="lesson-meta-item">🎯 No code required</span>
+    </div>
+  </div>
+</header>
+
+<main>
+<div class="container">
+
+  <!-- Section 1: What is gRPC -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🌐</span> What is gRPC?</h2>
+    <p>gRPC (Google Remote Procedure Call) is a high-performance, open-source framework for building APIs. Instead of sending JSON over HTTP/1.1 like REST, gRPC sends binary <strong>Protocol Buffer</strong> messages over <strong>HTTP/2</strong>.</p>
+    <p>Think of it like this: REST is a postcard (text, slow, one message at a time). gRPC is a dedicated phone line (binary, fast, bidirectional, always open).</p>
+
+    <div class="arch-diagram">
+      <p style="font-weight:700;margin-bottom:20px;color:var(--text);">REST vs gRPC Communication Model</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;text-align:left;">
+        <div style="background:white;border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
+          <p style="font-weight:700;color:var(--danger);margin-bottom:12px;">REST (HTTP/1.1)</p>
+          <div style="font-size:13px;color:var(--text-2);line-height:2;">
+            Client ──→ TCP connect<br/>
+            Client ──→ HTTP GET /api/data<br/>
+            Server ──→ {"key":"value"}<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(disconnect)<br/>
+            Client ──→ TCP connect again<br/>
+            Client ──→ HTTP POST /api/cmd<br/>
+            &nbsp;&nbsp;&nbsp;⚠ New connection each request
+          </div>
+        </div>
+        <div style="background:white;border:1px solid var(--border);border-radius:var(--radius);padding:20px;">
+          <p style="font-weight:700;color:var(--success);margin-bottom:12px;">gRPC (HTTP/2)</p>
+          <div style="font-size:13px;color:var(--text-2);line-height:2;">
+            Client ──→ Single TCP connect<br/>
+            Client ←→ Stream 1: messages<br/>
+            Client ←→ Stream 2: heartbeat<br/>
+            Client ←→ Stream 3: callbacks<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(connection stays open)<br/>
+            &nbsp;&nbsp;&nbsp;✓ Multiplexed, persistent
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 2: HTTP/2 Advantages -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🚀</span> HTTP/2 — What Makes gRPC Fast</h2>
+    <p>gRPC is built on HTTP/2 which brings several fundamental improvements over HTTP/1.1:</p>
+
+    <div class="rpc-grid">
+      <div class="rpc-card">
+        <div class="rpc-icon">🔗</div>
+        <div class="rpc-name">Multiplexing</div>
+        <div class="rpc-desc">Multiple concurrent streams over a single TCP connection. No head-of-line blocking.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">📦</div>
+        <div class="rpc-name">Binary Framing</div>
+        <div class="rpc-desc">Data sent as binary frames, not text. Faster to parse, smaller on the wire.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">🗜️</div>
+        <div class="rpc-name">Header Compression</div>
+        <div class="rpc-desc">HPACK compression reduces header overhead by up to 85% on repeated calls.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">⬆️⬇️</div>
+        <div class="rpc-name">Server Push</div>
+        <div class="rpc-desc">Server can push data to client without a request. Enables streaming patterns.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 3: Comparison Table -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">⚖️</span> REST vs gRPC — Full Comparison</h2>
+
+    <table class="compare-table">
+      <thead><tr><th>Feature</th><th>REST</th><th>gRPC</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Protocol</strong></td><td>HTTP/1.1 (mostly)</td><td>HTTP/2 (required)</td></tr>
+        <tr><td><strong>Data format</strong></td><td>JSON (text)</td><td>Protocol Buffers (binary)</td></tr>
+        <tr><td><strong>Schema</strong></td><td>Optional (OpenAPI)</td><td>Required (.proto file)</td></tr>
+        <tr><td><strong>Code generation</strong></td><td>Manual or tools</td><td>Built-in (protoc)</td></tr>
+        <tr><td><strong>Streaming</strong></td><td><span class="badge badge-yellow">Limited (SSE/WebSocket)</span></td><td><span class="badge badge-green">Native bidirectional</span></td></tr>
+        <tr><td><strong>Performance</strong></td><td>~</td><td><span class="badge badge-green">5–10× faster (binary)</span></td></tr>
+        <tr><td><strong>Browser support</strong></td><td><span class="badge badge-green">Native</span></td><td><span class="badge badge-yellow">Needs gRPC-Web / Envoy</span></td></tr>
+        <tr><td><strong>Error model</strong></td><td>HTTP status codes</td><td>Rich status codes + details</td></tr>
+        <tr><td><strong>Firewall traversal</strong></td><td>Inbound required</td><td><span class="badge badge-green">Can work outbound-only</span></td></tr>
+        <tr><td><strong>Best for</strong></td><td>Public APIs, browsers</td><td>Internal microservices, IoT, B2B</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Section 4: 4 RPC Types -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📡</span> 4 Types of gRPC Calls</h2>
+    <p>One of gRPC's superpowers is native support for 4 communication patterns:</p>
+
+    <div class="rpc-grid">
+      <div class="rpc-card">
+        <div class="rpc-icon">↔️</div>
+        <div class="rpc-name">Unary</div>
+        <div class="rpc-desc">One request → one response. Like a REST call. Used for: RegisterClient, GetStatus.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">📤</div>
+        <div class="rpc-name">Server Streaming</div>
+        <div class="rpc-desc">One request → many responses. Server streams events. Used for: live logs, updates.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">📥</div>
+        <div class="rpc-name">Client Streaming</div>
+        <div class="rpc-desc">Many requests → one response. Client streams data. Used for: bulk uploads, metrics.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">🔄</div>
+        <div class="rpc-name">Bidirectional</div>
+        <div class="rpc-desc">Many requests ↔ many responses. Full duplex. Used for: StreamMessages in your cplane.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 5: Architecture Callout -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🏗️</span> Why FlowGenX Uses gRPC</h2>
+
+    <div class="callout architecture">
+      <span class="callout-icon">🔮</span>
+      <div class="callout-body">
+        <div class="callout-title">Your Production Architecture</div>
+        <div class="callout-text">In <code>deployed/cplane/flowgenx_cp_grpc_server/</code> and <code>deployed/dplane/flowgenx_dp_grpc_client/</code>, gRPC solves a critical problem: <strong>dplane instances are often deployed behind corporate firewalls</strong> that block inbound connections. gRPC bidirectional streaming lets the dplane initiate an outbound connection to the cplane and then receive commands through that same persistent stream — no inbound ports needed on the dplane.</div>
+      </div>
+    </div>
+
+    <div class="arch-diagram">
+      <p style="font-weight:700;margin-bottom:20px;">FlowGenX B2B Deployment Architecture</p>
+      <div class="arch-flow">
+        <div style="text-align:center;">
+          <div class="arch-box" style="margin-bottom:8px;">oauth2</div>
+          <div style="font-size:12px;color:var(--text-muted);">Authentication</div>
+        </div>
+        <div class="arch-arrow">↕<span>auth</span></div>
+        <div style="border:2px dashed var(--border);border-radius:var(--radius);padding:16px;text-align:center;">
+          <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:12px;">DPLANE (Customer Network)</div>
+          <div style="display:flex;gap:8px;align-items:center;justify-content:center;">
+            <div class="arch-box">runtime apis</div>
+            <div class="arch-box">p. mcp</div>
+            <div class="arch-box">code executor</div>
+          </div>
+          <div style="margin-top:8px;" class="arch-box cyan">gRPC Client</div>
+        </div>
+        <div class="arch-arrow">←→<span>bidirectional stream</span></div>
+        <div style="border:2px dashed var(--primary-light);border-radius:var(--radius);padding:16px;text-align:center;">
+          <div style="font-size:12px;font-weight:700;color:var(--primary);margin-bottom:12px;">CPLANE (FlowGenX Cloud)</div>
+          <div class="arch-box primary">gRPC Server</div>
+          <div style="margin-top:8px;" class="arch-box">mcp router</div>
+        </div>
+      </div>
+    </div>
+
+    <p>The key insight: <strong>the dplane opens the connection outbound</strong>. This means:</p>
+    <ul>
+      <li>No firewall rules needed on the customer's side beyond standard HTTPS port</li>
+      <li>The cplane can send commands to the dplane through the open stream</li>
+      <li>Heartbeats keep the connection alive and detect failures instantly</li>
+      <li>Multiple dplane instances can connect to one cplane simultaneously</li>
+    </ul>
+  </section>
+
+  <!-- Section 6: When NOT to use gRPC -->
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🚫</span> When NOT to Use gRPC</h2>
+
+    <div class="callout warning">
+      <span class="callout-icon">⚠️</span>
+      <div class="callout-body">
+        <div class="callout-title">gRPC is not always the right choice</div>
+        <div class="callout-text">gRPC shines for internal microservices. But avoid it for public browser APIs (use REST + JSON), simple CRUD services where REST is simpler, teams unfamiliar with protobuf tooling, and when browser-native fetch() is required without a proxy.</div>
+      </div>
+    </div>
+
+    <table class="compare-table">
+      <thead><tr><th>Situation</th><th>Use</th></tr></thead>
+      <tbody>
+        <tr><td>Internal microservice-to-microservice</td><td><span class="badge badge-green">gRPC ✓</span></td></tr>
+        <tr><td>Public REST API for third parties</td><td><span class="badge badge-red">REST ✓</span></td></tr>
+        <tr><td>Browser SPA calling your backend</td><td><span class="badge badge-red">REST ✓</span></td></tr>
+        <tr><td>IoT device → cloud (constrained device)</td><td><span class="badge badge-green">gRPC ✓</span></td></tr>
+        <tr><td>B2B: your cloud → customer's on-prem agent</td><td><span class="badge badge-green">gRPC ✓</span></td></tr>
+        <tr><td>Real-time bidirectional messaging</td><td><span class="badge badge-green">gRPC ✓</span></td></tr>
+        <tr><td>Simple webhook receiver</td><td><span class="badge badge-red">REST ✓</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Videos -->
+  <section class="video-section fade-in">
+    <h2>📺 Video Resources</h2>
+    <div class="video-grid">
+      <a href="https://www.youtube.com/watch?v=AK6l52NKU8" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="AK6l52NKU8">
+          <img src="" alt="HTTP/2 gRPC deep dive"/>
+          <div class="play-overlay"><div class="play-btn">▶</div></div>
+        </div>
+        <div class="video-info">
+          <div class="video-title">The Ultimate Deep Dive into HTTP/2, gRPC and Protobuf</div>
+          <div class="video-meta"><span class="video-tag">Deep Dive</span> Technical breakdown of HTTP/2 frames</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=cgaBhA2qt7E" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="cgaBhA2qt7E">
+          <img src="" alt="REST gRPC GraphQL"/>
+          <div class="play-overlay"><div class="play-btn">▶</div></div>
+        </div>
+        <div class="video-info">
+          <div class="video-title">REST, gRPC, or GraphQL: Which Should You Use?</div>
+          <div class="video-meta"><span class="video-tag">Comparison</span> When to pick each protocol</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=AMNWLz_f6qM" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="AMNWLz_f6qM">
+          <img src="" alt="REST vs gRPC Microservices"/>
+          <div class="play-overlay"><div class="play-btn">▶</div></div>
+        </div>
+        <div class="video-info">
+          <div class="video-title">REST vs gRPC in Microservices — Explained Clearly</div>
+          <div class="video-meta"><span class="video-tag">Microservices</span> Practical comparison for distributed systems</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Exercise -->
+  <section class="exercise-section fade-in">
+    <h2>💪 Knowledge Check</h2>
+    <p class="exercise-subtitle">No code needed yet — test your understanding of the concepts.</p>
+
+    <div class="exercise-tabs">
+      <button class="ex-tab active" data-target="ex1-q">Questions</button>
+      <button class="ex-tab" data-target="ex1-a">Answers</button>
+    </div>
+
+    <div id="ex1-q" class="ex-panel active">
+      <div class="exercise-task">
+        <h3>Think about these questions:</h3>
+        <p>
+          1. Why does FlowGenX's dplane connect <em>outbound</em> to the cplane rather than the cplane connecting inbound to each dplane?<br/><br/>
+          2. In the diagram, what happens if the gRPC stream between dplane and cplane drops? What mechanism detects this?<br/><br/>
+          3. Why would a REST API be wrong for the cplane↔dplane connection even though it works fine for the platform UI?<br/><br/>
+          4. What would happen to <code>StreamMessages</code> if it were implemented as a REST polling endpoint instead?
+        </p>
+      </div>
+    </div>
+
+    <div id="ex1-a" class="ex-panel">
+      <div class="callout success">
+        <span class="callout-icon">✅</span>
+        <div class="callout-body">
+          <div class="callout-title">Model Answers</div>
+          <div class="callout-text">
+            <strong>1.</strong> Dplanes run in customer networks behind firewalls. Inbound ports to customer networks require firewall rules that customers often can't or won't open. Outbound HTTPS (443) is always open. gRPC bidirectional streaming over a single outbound connection solves this.<br/><br/>
+            <strong>2.</strong> Heartbeat messages sent on a timer detect the drop. If no heartbeat ACK arrives within a timeout, the dplane knows the connection is dead and triggers reconnection with exponential backoff (Lesson 10).<br/><br/>
+            <strong>3.</strong> REST would require polling (cplane can't push to dplane), each poll is a new HTTP connection (inefficient), and streaming commands would be impossible without WebSockets (complex, not HTTP/2 native).<br/><br/>
+            <strong>4.</strong> Polling REST would miss messages, add latency proportional to poll interval, generate massive overhead (new TCP+HTTP overhead per poll), and make ordering guarantees very hard.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Complete Button -->
+  <div style="text-align:center;margin-bottom:32px;">
+    <button class="complete-btn" data-lesson="1">✓ Mark Lesson 1 Complete</button>
+  </div>
+
+  <div class="completion-banner" data-lesson="1">
+    <h2>🎉 Lesson 1 Complete!</h2>
+    <p>You understand why gRPC is the right choice for cplane↔dplane. Next: learn the language of gRPC — Protocol Buffers.</p>
+  </div>
+
+  <div class="lesson-nav">
+    <a href="index.html" class="lesson-nav-btn btn-home">🏠 Course Home</a>
+    <a href="lesson-02.html" class="lesson-nav-btn btn-next">Lesson 2: Proto3 Foundations →</a>
+  </div>
+
+</div>
+</main>
+
+<footer>
+  <p>gRPC Mastery · <a href="index.html">Course Home</a> · <a href="https://grpc.io/docs/" target="_blank">grpc.io docs</a></p>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

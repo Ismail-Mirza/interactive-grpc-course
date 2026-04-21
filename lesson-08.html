@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lesson 8: Security — TLS & JWT | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links"><a href="index.html" class="nav-link">← All Lessons</a></div>
+    <div class="nav-progress-wrap"><span class="nav-progress-count">0/10</span><div class="nav-progress-bar"><div class="nav-progress-fill"></div></div></div>
+  </div>
+</nav>
+
+<header class="lesson-hero">
+  <div class="container">
+    <div class="lesson-badge">Lesson 8 of 10 · Advanced</div>
+    <h1>Security — TLS &amp; JWT Auth</h1>
+    <p class="lesson-subtitle">Secure your gRPC channel with TLS, generate self-signed certificates, and implement JWT authentication interceptors — exactly how FlowGenX authenticates dplane clients connecting to cplane.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">⏱ 70 min</span>
+      <span class="lesson-meta-item">🔐 Security</span>
+      <span class="lesson-meta-item">📁 Creates: auth.py + certs/</span>
+    </div>
+  </div>
+</header>
+
+<main><div class="container">
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔒</span> TLS — Encrypting the Channel</h2>
+    <p>By default, <code>grpc.insecure_channel()</code> sends data unencrypted. In production, always use TLS. gRPC supports:</p>
+
+    <div class="rpc-grid">
+      <div class="rpc-card">
+        <div class="rpc-icon">🔒</div>
+        <div class="rpc-name">Server-side TLS</div>
+        <div class="rpc-desc">Server has a certificate. Client verifies it. Standard HTTPS-style encryption.</div>
+      </div>
+      <div class="rpc-card">
+        <div class="rpc-icon">🤝</div>
+        <div class="rpc-name">Mutual TLS (mTLS)</div>
+        <div class="rpc-desc">Both client AND server have certificates. Each verifies the other. Used in zero-trust B2B scenarios.</div>
+      </div>
+    </div>
+
+    <h3>Step 1 — Generate Self-Signed Certificates</h3>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Generate certs with openssl</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash">mkdir -p grpc-demo/certs && cd grpc-demo/certs
+
+# 1. Generate CA private key and certificate
+openssl genrsa -out ca.key 4096
+openssl req -new -x509 -days 3650 -key ca.key -out ca.crt \
+  -subj "/C=US/O=FlowGenX/CN=FlowGenX-CA"
+
+# 2. Generate server private key and CSR
+openssl genrsa -out server.key 4096
+openssl req -new -key server.key -out server.csr \
+  -subj "/C=US/O=FlowGenX/CN=cplane.flowgenx.local"
+
+# 3. Sign server cert with CA
+openssl x509 -req -days 365 -in server.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out server.crt
+
+# For mTLS — also create client cert
+openssl genrsa -out client.key 4096
+openssl req -new -key client.key -out client.csr \
+  -subj "/C=US/O=FlowGenX/CN=dplane-client"
+openssl x509 -req -days 365 -in client.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out client.crt
+
+ls  # ca.crt  server.crt  server.key  client.crt  client.key</code></pre>
+    </div>
+
+    <h3>Step 2 — TLS Server</h3>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">server.py — TLS enabled</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">def serve_tls(port=50051, certs_dir='../certs'):
+    # Load certificates
+    with open(f'{certs_dir}/server.key', 'rb') as f:
+        private_key = f.read()
+    with open(f'{certs_dir}/server.crt', 'rb') as f:
+        certificate_chain = f.read()
+    with open(f'{certs_dir}/ca.crt', 'rb') as f:
+        root_ca = f.read()
+
+    # Server-side TLS (one-way)
+    server_credentials = grpc.ssl_server_credentials(
+        [(private_key, certificate_chain)]
+    )
+
+    # mTLS: also require client certificate
+    # server_credentials = grpc.ssl_server_credentials(
+    #     [(private_key, certificate_chain)],
+    #     root_certificates=root_ca,
+    #     require_client_auth=True  # enforce mTLS
+    # )
+
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    cplane_pb2_grpc.add_ControlPlaneServicer_to_server(ControlPlaneServicer(), server)
+    server.add_secure_port(f'[::]:{port}', server_credentials)  # Note: add_secure_port
+    server.start()
+    logger.info(f"Secure TLS server started on port {port}")
+    server.wait_for_termination()
+</code></pre>
+    </div>
+
+    <h3>Step 3 — TLS Client</h3>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">client.py — TLS channel</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">def connect_tls(server_address='cplane.flowgenx.local:50051', certs_dir='../certs'):
+    with open(f'{certs_dir}/ca.crt', 'rb') as f:
+        root_ca = f.read()
+
+    # One-way TLS: client verifies server cert against CA
+    credentials = grpc.ssl_channel_credentials(root_certificates=root_ca)
+
+    # mTLS: client also presents its own cert
+    # with open(f'{certs_dir}/client.key', 'rb') as f:
+    #     client_key = f.read()
+    # with open(f'{certs_dir}/client.crt', 'rb') as f:
+    #     client_cert = f.read()
+    # credentials = grpc.ssl_channel_credentials(
+    #     root_certificates=root_ca,
+    #     private_key=client_key,
+    #     certificate_chain=client_cert
+    # )
+
+    channel = grpc.secure_channel(server_address, credentials)  # secure_channel!
+    return cplane_pb2_grpc.ControlPlaneStub(channel)
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🎫</span> JWT Authentication</h2>
+    <p>TLS encrypts the channel. JWT authenticates <em>who</em> is connecting. This is the same pattern used in <code>deployed/cplane/flowgenx_cp_grpc_server/</code> — the cplane validates JWT tokens from dplane clients.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Install JWT library</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash">pip install PyJWT cryptography</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">grpc-demo/cplane/auth.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import jwt
+import time
+from datetime import datetime, timezone, timedelta
+
+# In production: load from env/vault, rotate regularly
+SECRET_KEY = "your-256-bit-secret-change-in-production"
+ALGORITHM = "HS256"
+
+
+def create_token(client_id: str, tenant_id: str, ttl_hours: int = 24) -> str:
+    """Generate a JWT token for a dplane client."""
+    payload = {
+        "sub": client_id,
+        "tenant_id": tenant_id,
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=ttl_hours),
+        "iss": "cplane.flowgenx.ai",
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_token(token: str) -> dict:
+    """Verify a JWT token and return the decoded payload."""
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": True}
+        )
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise ValueError("Token has expired")
+    except jwt.InvalidTokenError as e:
+        raise ValueError(f"Invalid token: {e}")
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">JWT Auth Interceptor (server)</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">from auth import verify_token
+
+class JWTAuthInterceptor(grpc.ServerInterceptor):
+    """Validates JWT bearer tokens on all authenticated endpoints."""
+
+    EXEMPT_METHODS = {'/cplane.ControlPlane/RegisterClient'}
+
+    def intercept_service(self, continuation, handler_call_details):
+        if handler_call_details.method in self.EXEMPT_METHODS:
+            return continuation(handler_call_details)
+
+        meta = dict(handler_call_details.invocation_metadata)
+        auth_header = meta.get('authorization', '')
+
+        if not auth_header.startswith('Bearer '):
+            def deny(req, ctx):
+                ctx.abort(grpc.StatusCode.UNAUTHENTICATED,
+                          "Missing Authorization: Bearer <token> header")
+            return grpc.unary_unary_rpc_method_handler(deny)
+
+        token = auth_header[7:]  # strip "Bearer "
+        try:
+            payload = verify_token(token)
+            # Inject the decoded payload into context
+            # (In practice, store in context.peer() or a thread-local)
+        except ValueError as e:
+            def deny(req, ctx):
+                ctx.abort(grpc.StatusCode.UNAUTHENTICATED, str(e))
+            return grpc.unary_unary_rpc_method_handler(deny)
+
+        return continuation(handler_call_details)
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Client: send JWT in metadata</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">class DPlaneClient:
+    def __init__(self, server_address, client_id, auth_token):
+        self.auth_token = auth_token  # JWT token from cplane
+        ...
+
+    def _metadata(self):
+        return [
+            ('authorization', f'Bearer {self.auth_token}'),
+            ('x-client-id', self.client_id),
+            ('x-trace-id', str(uuid.uuid4())),
+        ]
+
+    def get_status(self, client_id):
+        return self.stub.GetClientStatus(
+            cplane_pb2.GetStatusRequest(client_id=client_id),
+            metadata=self._metadata(),  # attach auth on every call
+            timeout=10.0
+        )
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔄</span> Token Refresh Pattern</h2>
+    <p>JWTs expire. The dplane must refresh its token before it expires and reconnect with the new token:</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Token refresh in the dplane client</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import threading
+
+class DPlaneClient:
+    def __init__(self, ...):
+        self.auth_token = None
+        self.token_expires_at = 0
+        self._refresh_lock = threading.Lock()
+
+    def get_valid_token(self):
+        """Return a valid token, refreshing if needed."""
+        if time.time() > (self.token_expires_at - 300):  # refresh 5 min early
+            with self._refresh_lock:
+                if time.time() > (self.token_expires_at - 300):
+                    self._do_token_refresh()
+        return self.auth_token
+
+    def _do_token_refresh(self):
+        """Call cplane to get a new token (e.g. via separate REST endpoint)."""
+        # Example: call OAuth2 token endpoint
+        response = requests.post(
+            'https://auth.flowgenx.ai/token',
+            data={'client_id': self.client_id, 'client_secret': self.secret}
+        )
+        data = response.json()
+        self.auth_token = data['access_token']
+        self.token_expires_at = time.time() + data['expires_in']
+        logger.info("Token refreshed successfully")
+</code></pre>
+    </div>
+  </section>
+
+  <!-- Videos -->
+  <section class="video-section fade-in">
+    <h2>📺 Video Resources</h2>
+    <div class="video-grid">
+      <a href="https://www.youtube.com/watch?v=_y-lzjdVEf0" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="_y-lzjdVEf0"><img src="" alt="gRPC Security"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">Authentication and Security in gRPC Microservices — Google</div>
+          <div class="video-meta"><span class="video-tag">Official</span> Jan Tattermusch, Google — gRPC auth fundamentals</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=jmqLJMFS_yI" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="jmqLJMFS_yI"><img src="" alt="gRPC TLS"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">Secure gRPC Connection with SSL/TLS — Golang</div>
+          <div class="video-meta"><span class="video-tag">TLS</span> Server-side and mTLS patterns</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=kdWmpTZyqvw" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="kdWmpTZyqvw"><img src="" alt="OpenSSL gRPC TLS"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">OpenSSL: Create TLS Key, CSR, Certificate &amp; Enable gRPC TLS</div>
+          <div class="video-meta"><span class="video-tag">Practical</span> Step-by-step cert generation</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Exercise -->
+  <section class="exercise-section fade-in">
+    <h2>💪 Exercise</h2>
+    <p class="exercise-subtitle">Implement end-to-end JWT auth flow.</p>
+    <div class="exercise-tabs">
+      <button class="ex-tab active" data-target="ex8-q">Task</button>
+      <button class="ex-tab" data-target="ex8-a">Solution</button>
+    </div>
+    <div id="ex8-q" class="ex-panel active">
+      <div class="exercise-task">
+        <h3>Full JWT auth flow:</h3>
+        <p>
+          1. In <code>RegisterClient</code>, after successful registration, generate and return a JWT token in the response (add a <code>jwt_token</code> string field to <code>RegisterResponse</code> in the proto)<br/><br/>
+          2. The dplane client stores this token after registration<br/><br/>
+          3. Add the <code>JWTAuthInterceptor</code> to the server<br/><br/>
+          4. Update the client to pass the token in all subsequent calls via <code>metadata=[('authorization', 'Bearer ' + token)]</code><br/><br/>
+          5. Test: call <code>GetClientStatus</code> without a token → should get <code>UNAUTHENTICATED</code>
+        </p>
+      </div>
+    </div>
+    <div id="ex8-a" class="ex-panel">
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Server: return JWT on registration</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python">from auth import create_token
+
+def RegisterClient(self, request, context):
+    # ... validation ...
+    session_id = str(uuid.uuid4())
+    # Generate a token for this client
+    token = create_token(
+        client_id=request.client_id,
+        tenant_id=request.tenant_id,
+        ttl_hours=24
+    )
+    connected_clients[request.client_id] = {
+        "session_id": session_id,
+        "tenant_id": request.tenant_id,
+    }
+    return cplane_pb2.RegisterResponse(
+        success=True,
+        session_id=session_id,
+        message="Registration successful",
+        jwt_token=token,   # NEW: return token
+    )
+
+# Client stores and uses the token
+resp = client.register(...)
+client.auth_token = resp.jwt_token  # store it
+
+# Then use it
+status = client.stub.GetClientStatus(
+    request,
+    metadata=[('authorization', f'Bearer {client.auth_token}')]
+)
+</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <div style="text-align:center;margin-bottom:32px;">
+    <button class="complete-btn" data-lesson="8">✓ Mark Lesson 8 Complete</button>
+  </div>
+  <div class="completion-banner" data-lesson="8">
+    <h2>🎉 Lesson 8 Complete!</h2>
+    <p>Your gRPC service is now secured with TLS and JWT. Next: add observability so you can monitor it in production.</p>
+  </div>
+  <div class="lesson-nav">
+    <a href="lesson-07.html" class="lesson-nav-btn btn-prev">← Lesson 7: Interceptors</a>
+    <a href="lesson-09.html" class="lesson-nav-btn btn-next">Lesson 9: Observability →</a>
+  </div>
+
+</div></main>
+<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · <a href="https://grpc.io/docs/guides/auth/" target="_blank">gRPC Auth Guide</a></p></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

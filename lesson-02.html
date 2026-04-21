@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lesson 2: Proto3 Foundations | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links"><a href="index.html" class="nav-link">← All Lessons</a></div>
+    <div class="nav-progress-wrap">
+      <span class="nav-progress-count">0/10</span>
+      <div class="nav-progress-bar"><div class="nav-progress-fill"></div></div>
+    </div>
+  </div>
+</nav>
+
+<header class="lesson-hero">
+  <div class="container">
+    <div class="lesson-badge">Lesson 2 of 10 · Beginner</div>
+    <h1>Proto3 Foundations</h1>
+    <p class="lesson-subtitle">Learn the language of gRPC — Protocol Buffers. Write your first .proto file, understand types and field numbers, and generate Python stubs with protoc.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">⏱ 45 min</span>
+      <span class="lesson-meta-item">🔨 First code</span>
+      <span class="lesson-meta-item">📁 Creates: cplane.proto</span>
+    </div>
+  </div>
+</header>
+
+<main><div class="container">
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📄</span> What is a .proto File?</h2>
+    <p>A <code>.proto</code> file is the <strong>single source of truth</strong> for your gRPC service. It defines:</p>
+    <ul>
+      <li>The <strong>messages</strong> (data structures) that get sent over the wire</li>
+      <li>The <strong>services</strong> (RPC endpoints) that clients can call</li>
+      <li>The <strong>field types and numbers</strong> used for binary encoding</li>
+    </ul>
+    <p>From one <code>.proto</code> file, <code>protoc</code> generates client and server code in Python, Go, Java, TypeScript, and 10+ other languages. This is what makes gRPC language-agnostic.</p>
+
+    <div class="callout info">
+      <span class="callout-icon">💡</span>
+      <div class="callout-body">
+        <div class="callout-title">Proto file is a contract</div>
+        <div class="callout-text">The <code>.proto</code> file is shared between both sides. In FlowGenX, <code>deployed/cplane/flowgenx_cp_grpc_server/proto/cplane.proto</code> is the contract that both the server and <code>deployed/dplane/flowgenx_dp_grpc_client/proto/</code> use. Change the proto, regenerate both sides.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔤</span> Scalar Types</h2>
+    <p>Proto3 has built-in scalar types that map to Python types:</p>
+
+    <table class="compare-table">
+      <thead><tr><th>Proto Type</th><th>Python Type</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><code>string</code></td><td><code>str</code></td><td>UTF-8 text</td></tr>
+        <tr><td><code>bool</code></td><td><code>bool</code></td><td>True / False</td></tr>
+        <tr><td><code>int32</code></td><td><code>int</code></td><td>32-bit signed integer</td></tr>
+        <tr><td><code>int64</code></td><td><code>int</code></td><td>64-bit signed integer</td></tr>
+        <tr><td><code>float</code></td><td><code>float</code></td><td>32-bit float</td></tr>
+        <tr><td><code>double</code></td><td><code>float</code></td><td>64-bit float</td></tr>
+        <tr><td><code>bytes</code></td><td><code>bytes</code></td><td>Arbitrary binary data</td></tr>
+        <tr><td><code>uint32</code></td><td><code>int</code></td><td>Unsigned 32-bit</td></tr>
+        <tr><td><code>uint64</code></td><td><code>int</code></td><td>Unsigned 64-bit</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout warning">
+      <span class="callout-icon">⚠️</span>
+      <div class="callout-body">
+        <div class="callout-title">Default values in proto3</div>
+        <div class="callout-text">In proto3, all fields have default values: <code>string</code> → <code>""</code>, <code>int32</code> → <code>0</code>, <code>bool</code> → <code>False</code>, <code>bytes</code> → <code>b""</code>. There is NO <code>null</code> — use <code>optional</code> keyword or <code>oneof</code> if you need to distinguish "not set" from the default value.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📦</span> Messages, Fields & Field Numbers</h2>
+    <p>A <code>message</code> is proto3's equivalent of a class or struct. Each field has a <strong>type</strong>, a <strong>name</strong>, and a <strong>field number</strong>.</p>
+
+    <div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">proto3</span>
+        <span class="code-filename">example.proto</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+      <pre><code class="language-protobuf">syntax = "proto3";
+
+package example;
+
+// A message is like a Python dataclass
+message ClientInfo {
+  string client_id   = 1;   // field number 1
+  string tenant_id   = 2;   // field number 2
+  string version     = 3;   // field number 3
+  bool   is_active   = 4;   // field number 4
+  int32  retry_count = 5;   // field number 5
+}
+</code></pre>
+    </div>
+
+    <div class="callout warning">
+      <span class="callout-icon">🔢</span>
+      <div class="callout-body">
+        <div class="callout-title">Field numbers are CRITICAL — never change them</div>
+        <div class="callout-text">Field numbers (1, 2, 3...) are what get encoded in the binary wire format — NOT the field names. If you change a field number, old clients can't read new messages. Numbers 1–15 use 1 byte. Numbers 16–2047 use 2 bytes. Always use 1–15 for frequently-used fields.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📋</span> Enums, Repeated & Nested Messages</h2>
+
+    <div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">proto3</span>
+        <span class="code-filename">example.proto</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+      <pre><code class="language-protobuf">syntax = "proto3";
+
+// Enums: named integer constants
+enum MessageType {
+  UNKNOWN         = 0;  // Always start at 0 in proto3
+  CLIENT_REQUEST  = 1;
+  SERVER_REQUEST  = 2;
+  RESPONSE        = 3;
+  HEARTBEAT       = 4;
+}
+
+// Repeated: like a Python list
+message StreamPayload {
+  repeated string tags = 1;   // ["tag1", "tag2"]
+  repeated int32  ids  = 2;   // [1, 2, 3]
+}
+
+// Nested message: message inside message
+message Wrapper {
+  ClientInfo info    = 1;  // nested ClientInfo
+  MessageType type   = 2;  // enum field
+  StreamPayload data = 3;  // nested StreamPayload
+}
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔌</span> Services and RPCs</h2>
+    <p>A <code>service</code> defines the RPC methods that a gRPC server exposes. This is what becomes your server class and client stub.</p>
+
+    <div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">proto3</span>
+        <span class="code-filename">example.proto</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+      <pre><code class="language-protobuf">syntax = "proto3";
+
+// Request/Response messages
+message RegisterRequest {
+  string client_id  = 1;
+  string tenant_id  = 2;
+  string auth_token = 3;
+}
+
+message RegisterResponse {
+  bool   success   = 1;
+  string session_id = 2;
+  string message   = 3;
+}
+
+// The service definition
+service ControlPlane {
+  // Unary RPC: one request, one response
+  rpc RegisterClient (RegisterRequest) returns (RegisterResponse);
+
+  // Server streaming: one request, many responses
+  rpc ListConnectors (ListRequest) returns (stream ConnectorInfo);
+
+  // Client streaming: many requests, one response
+  rpc UploadLogs (stream LogEntry) returns (UploadResponse);
+
+  // Bidirectional streaming: many ↔ many
+  rpc StreamMessages (stream ClientMessage) returns (stream ServerMessage);
+}
+</code></pre>
+    </div>
+
+    <div class="callout architecture">
+      <span class="callout-icon">🔮</span>
+      <div class="callout-body">
+        <div class="callout-title">Your cplane.proto uses all 4 patterns</div>
+        <div class="callout-text">In <code>deployed/cplane/flowgenx_cp_grpc_server/proto/cplane.proto</code>, you'll find exactly these patterns: <code>RegisterClient</code> (unary), <code>GetClientStatus</code> (unary), <code>ExecuteAPIRequest</code> (unary), and <code>StreamMessages</code> (bidirectional streaming) — the most important one that keeps the dplane connected.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">⚙️</span> Generating Python Code with protoc</h2>
+    <p>After writing your <code>.proto</code> file, you compile it with <code>protoc</code> to generate Python files:</p>
+
+    <div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">bash</span>
+        <span class="code-filename">terminal</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+      <pre><code class="language-bash"># Install tools
+pip install grpcio grpcio-tools
+
+# Generate Python stubs from proto file
+python -m grpc_tools.protoc \
+  -I proto/ \
+  --python_out=proto/ \
+  --grpc_python_out=proto/ \
+  proto/cplane.proto
+
+# This generates two files:
+# proto/cplane_pb2.py       — message classes
+# proto/cplane_pb2_grpc.py  — server/client stubs</code></pre>
+    </div>
+
+    <h3>What gets generated?</h3>
+    <table class="compare-table">
+      <thead><tr><th>File</th><th>Contains</th><th>You use it for</th></tr></thead>
+      <tbody>
+        <tr><td><code>cplane_pb2.py</code></td><td>Message classes (RegisterRequest, RegisterResponse...)</td><td>Creating/reading message objects</td></tr>
+        <tr><td><code>cplane_pb2_grpc.py</code></td><td>Stub (client) + Servicer (server base class)</td><td>Server: extend Servicer. Client: create Stub.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout info">
+      <span class="callout-icon">💡</span>
+      <div class="callout-body">
+        <div class="callout-title">Never edit generated files</div>
+        <div class="callout-text">The files ending in <code>_pb2.py</code> and <code>_pb2_grpc.py</code> are auto-generated. Never edit them manually — they get overwritten every time you run <code>protoc</code>. In FlowGenX's dplane client, these live in <code>proto/</code> and are committed to the repo so no compile step is needed at runtime.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Demo Step -->
+  <section class="content-section fade-in" style="border-color:var(--primary);border-width:2px;">
+    <h2><span class="section-icon">🛠️</span> Demo Project — Step 1: Your First Proto File</h2>
+    <p>Create the foundation for the mini cplane↔dplane you'll build throughout this course:</p>
+
+    <div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">bash</span>
+        <span class="code-filename">terminal</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+      <pre><code class="language-bash">mkdir -p grpc-demo/proto grpc-demo/cplane grpc-demo/dplane
+cd grpc-demo
+pip install grpcio grpcio-tools</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">proto3</span>
+        <span class="code-filename">grpc-demo/proto/cplane.proto</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+      <pre><code class="language-protobuf">syntax = "proto3";
+
+package cplane;
+
+// ─── Enums ───────────────────────────────────────────
+enum MessageType {
+  UNKNOWN          = 0;
+  CLIENT_REQUEST   = 1;
+  SERVER_REQUEST   = 2;
+  RESPONSE         = 3;
+  HEARTBEAT        = 4;
+}
+
+enum ActionType {
+  GET    = 0;
+  POST   = 1;
+  PUT    = 2;
+  DELETE = 3;
+  PATCH  = 4;
+}
+
+// ─── Registration ────────────────────────────────────
+message RegisterRequest {
+  string client_id   = 1;
+  string tenant_id   = 2;
+  string auth_token  = 3;
+  string version     = 4;
+}
+
+message RegisterResponse {
+  bool   success    = 1;
+  string session_id = 2;
+  string message    = 3;
+}
+
+// ─── Streaming Messages ──────────────────────────────
+message ClientMessage {
+  string      message_id = 1;
+  MessageType type       = 2;
+  string      payload    = 3;
+  string      client_id  = 4;
+}
+
+message ServerMessage {
+  string      message_id = 1;
+  MessageType type       = 2;
+  string      payload    = 3;
+  ActionType  action     = 4;
+}
+
+// ─── Service ─────────────────────────────────────────
+service ControlPlane {
+  rpc RegisterClient  (RegisterRequest)          returns (RegisterResponse);
+  rpc StreamMessages  (stream ClientMessage)     returns (stream ServerMessage);
+}</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">bash</span>
+        <span class="code-filename">Generate stubs</span>
+        <button class="copy-btn">Copy</button>
+      </div>
+      <pre><code class="language-bash"># From grpc-demo/ folder
+python -m grpc_tools.protoc \
+  -I proto/ \
+  --python_out=proto/ \
+  --grpc_python_out=proto/ \
+  proto/cplane.proto
+
+# Verify: you should now see:
+ls proto/
+# cplane.proto  cplane_pb2.py  cplane_pb2_grpc.py</code></pre>
+    </div>
+  </section>
+
+  <!-- Videos -->
+  <section class="video-section fade-in">
+    <h2>📺 Video Resources</h2>
+    <div class="video-grid">
+      <a href="https://www.youtube.com/watch?v=46O73On0gyI" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="46O73On0gyI">
+          <img src="" alt="Protocol Buffers Crash Course"/>
+          <div class="play-overlay"><div class="play-btn">▶</div></div>
+        </div>
+        <div class="video-info">
+          <div class="video-title">Protocol Buffers Crash Course</div>
+          <div class="video-meta"><span class="video-tag">Beginner</span> Complete intro to protobuf syntax</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=-XvwRNK4v0c" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="-XvwRNK4v0c">
+          <img src="" alt="Protobufs in 6 Minutes"/>
+          <div class="play-overlay"><div class="play-btn">▶</div></div>
+        </div>
+        <div class="video-info">
+          <div class="video-title">Protobufs in 6 Minutes: A Beginner's Introduction</div>
+          <div class="video-meta"><span class="video-tag">Quick</span> Fast and focused intro</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=wcY7bvyE4q4" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="wcY7bvyE4q4">
+          <img src="" alt="Protobuf Explained"/>
+          <div class="play-overlay"><div class="play-btn">▶</div></div>
+        </div>
+        <div class="video-info">
+          <div class="video-title">Protocol Buffers Explained with Practical Examples</div>
+          <div class="video-meta"><span class="video-tag">Practical</span> Message & RPC methods walkthrough</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Exercise -->
+  <section class="exercise-section fade-in">
+    <h2>💪 Exercise</h2>
+    <p class="exercise-subtitle">Extend the proto file with new messages.</p>
+    <div class="exercise-tabs">
+      <button class="ex-tab active" data-target="ex2-q">Task</button>
+      <button class="ex-tab" data-target="ex2-a">Solution</button>
+    </div>
+    <div id="ex2-q" class="ex-panel active">
+      <div class="exercise-task">
+        <h3>Add to your cplane.proto:</h3>
+        <p>
+          1. Add a <code>ClientStatus</code> enum with values: <code>CONNECTED</code>, <code>DISCONNECTED</code>, <code>ERROR</code><br/><br/>
+          2. Add a <code>GetStatusRequest</code> message with fields: <code>client_id</code> (string), <code>session_id</code> (string)<br/><br/>
+          3. Add a <code>GetStatusResponse</code> message with fields: <code>client_id</code>, <code>status</code> (ClientStatus enum), <code>last_heartbeat</code> (int64 timestamp)<br/><br/>
+          4. Add a <code>GetClientStatus</code> unary RPC to the ControlPlane service
+        </p>
+      </div>
+    </div>
+    <div id="ex2-a" class="ex-panel">
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">proto3</span><span class="code-filename">Solution</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-protobuf">// Add this enum
+enum ClientStatus {
+  CONNECTED    = 0;
+  DISCONNECTED = 1;
+  ERROR        = 2;
+}
+
+// Add these messages
+message GetStatusRequest {
+  string client_id  = 1;
+  string session_id = 2;
+}
+
+message GetStatusResponse {
+  string       client_id      = 1;
+  ClientStatus status         = 2;
+  int64        last_heartbeat = 3;
+}
+
+// Update the service
+service ControlPlane {
+  rpc RegisterClient  (RegisterRequest)      returns (RegisterResponse);
+  rpc GetClientStatus (GetStatusRequest)     returns (GetStatusResponse);
+  rpc StreamMessages  (stream ClientMessage) returns (stream ServerMessage);
+}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <div style="text-align:center;margin-bottom:32px;">
+    <button class="complete-btn" data-lesson="2">✓ Mark Lesson 2 Complete</button>
+  </div>
+  <div class="completion-banner" data-lesson="2">
+    <h2>🎉 Lesson 2 Complete!</h2>
+    <p>You've written your first .proto file and generated Python stubs. Next: master the advanced proto3 features used in your production cplane.proto.</p>
+  </div>
+  <div class="lesson-nav">
+    <a href="lesson-01.html" class="lesson-nav-btn btn-prev">← Lesson 1: gRPC vs REST</a>
+    <a href="lesson-03.html" class="lesson-nav-btn btn-next">Lesson 3: Advanced Proto3 →</a>
+  </div>
+
+</div></main>
+
+<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · <a href="https://protobuf.dev/programming-guides/proto3/" target="_blank">Proto3 Language Guide</a></p></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

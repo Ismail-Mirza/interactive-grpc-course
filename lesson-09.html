@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lesson 9: Observability, Health & Testing | gRPC Mastery</title>
+<link rel="stylesheet" href="styles.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/night-owl.min.css"/>
+</head>
+<body>
+<nav class="top-nav">
+  <div class="top-nav-inner">
+    <a href="index.html" class="nav-logo"><div class="nav-logo-icon">⚡</div>gRPC Mastery</a>
+    <div class="nav-links"><a href="index.html" class="nav-link">← All Lessons</a></div>
+    <div class="nav-progress-wrap"><span class="nav-progress-count">0/10</span><div class="nav-progress-bar"><div class="nav-progress-fill"></div></div></div>
+  </div>
+</nav>
+
+<header class="lesson-hero">
+  <div class="container">
+    <div class="lesson-badge">Lesson 9 of 10 · Advanced</div>
+    <h1>Observability, Health &amp; Testing</h1>
+    <p class="lesson-subtitle">Add the gRPC health check protocol, Prometheus metrics, OpenTelemetry tracing, use grpcurl for manual testing, and write unit and integration tests for your gRPC services.</p>
+    <div class="lesson-meta">
+      <span class="lesson-meta-item">⏱ 70 min</span>
+      <span class="lesson-meta-item">📊 Metrics + Tracing</span>
+      <span class="lesson-meta-item">🧪 Testing</span>
+    </div>
+  </div>
+</header>
+
+<main><div class="container">
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">💓</span> gRPC Health Checking Protocol</h2>
+    <p>gRPC has a standard health check protocol (<code>grpc.health.v1</code>) that Kubernetes liveness/readiness probes, load balancers, and service meshes understand natively.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Install health check package</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash">pip install grpcio-health-checking</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">server.py — add health checking</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">from grpc_health.v1 import health, health_pb2, health_pb2_grpc
+from grpc_health.v1.health import HealthServicer
+
+def serve(port=50051):
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+
+    # Add your service
+    cplane_pb2_grpc.add_ControlPlaneServicer_to_server(ControlPlaneServicer(), server)
+
+    # Add health checking service
+    health_servicer = HealthServicer()
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
+
+    # Set initial health status
+    health_servicer.set(
+        'cplane.ControlPlane',
+        health_pb2.HealthCheckResponse.SERVING
+    )
+    health_servicer.set(
+        '',  # empty string = overall server health
+        health_pb2.HealthCheckResponse.SERVING
+    )
+
+    server.add_insecure_port(f'[::]:{port}')
+    server.start()
+    logger.info(f"Server + health check on port {port}")
+
+    # Update health status dynamically based on state
+    def update_health():
+        while True:
+            time.sleep(10)
+            if len(connected_clients) > 0:
+                health_servicer.set('cplane.ControlPlane',
+                                    health_pb2.HealthCheckResponse.SERVING)
+            # Could set NOT_SERVING if database is down, etc.
+
+    threading.Thread(target=update_health, daemon=True).start()
+    server.wait_for_termination()
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Check health with grpcurl</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash"># Install grpcurl
+brew install grpcurl   # macOS
+# or: go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+
+# Check health (no TLS)
+grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
+
+# Response: { "status": "SERVING" }
+
+# List all services
+grpcurl -plaintext localhost:50051 list
+
+# Describe a service
+grpcurl -plaintext localhost:50051 describe cplane.ControlPlane</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">📊</span> Prometheus Metrics</h2>
+    <p>Add request count, latency histograms, and active stream gauges — the same metrics FlowGenX's dplane client exports.</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Install</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash">pip install prometheus-client</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">grpc-demo/cplane/metrics.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">from prometheus_client import Counter, Histogram, Gauge, start_http_server
+
+# Define metrics
+rpc_requests_total = Counter(
+    'grpc_server_requests_total',
+    'Total gRPC requests',
+    ['method', 'status']
+)
+
+rpc_duration_seconds = Histogram(
+    'grpc_server_duration_seconds',
+    'gRPC request duration',
+    ['method'],
+    buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
+)
+
+active_streams = Gauge(
+    'grpc_active_streams',
+    'Number of active bidirectional streams'
+)
+
+registered_clients = Gauge(
+    'cplane_registered_clients_total',
+    'Number of currently registered dplane clients'
+)
+
+
+def start_metrics_server(port=9090):
+    """Expose Prometheus metrics on /metrics."""
+    start_http_server(port)
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Metrics interceptor</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import time
+from metrics import rpc_requests_total, rpc_duration_seconds
+
+class MetricsInterceptor(grpc.ServerInterceptor):
+    def intercept_service(self, continuation, handler_call_details):
+        method = handler_call_details.method.split('/')[-1]
+        handler = continuation(handler_call_details)
+
+        if handler and handler.unary_unary:
+            original = handler.unary_unary
+            def timed(request, context):
+                start = time.monotonic()
+                try:
+                    result = original(request, context)
+                    rpc_requests_total.labels(method=method, status='OK').inc()
+                    return result
+                except Exception as e:
+                    rpc_requests_total.labels(method=method, status='ERROR').inc()
+                    raise
+                finally:
+                    rpc_duration_seconds.labels(method=method).observe(
+                        time.monotonic() - start
+                    )
+            return handler._replace(unary_unary=timed)
+        return handler
+
+
+# In StreamMessages, track active streams:
+def StreamMessages(self, request_iterator, context):
+    active_streams.inc()
+    try:
+        # ... streaming logic ...
+        pass
+    finally:
+        active_streams.dec()
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔭</span> OpenTelemetry Tracing</h2>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">Install</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash">pip install opentelemetry-api opentelemetry-sdk \
+            opentelemetry-exporter-otlp-proto-grpc \
+            opentelemetry-instrumentation-grpc</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Setup OpenTelemetry tracing</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.grpc import GrpcInstrumentorServer
+
+def setup_tracing(service_name='cplane-grpc-server'):
+    provider = TracerProvider()
+    exporter = OTLPSpanExporter(endpoint="http://otel-collector:4317")
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+
+    # Auto-instrument gRPC server (adds spans for every RPC)
+    GrpcInstrumentorServer().instrument()
+
+    return trace.get_tracer(service_name)
+
+# Manual spans within your RPC handler:
+tracer = setup_tracing()
+
+def RegisterClient(self, request, context):
+    with tracer.start_as_current_span("register-client") as span:
+        span.set_attribute("client.id", request.client_id)
+        span.set_attribute("tenant.id", request.tenant_id)
+        # ... your logic ...
+        span.set_attribute("session.id", session_id)
+        return response
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🧪</span> Testing gRPC Services</h2>
+
+    <h3>Unit Testing with mock context</h3>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">tests/test_server.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import pytest
+import grpc
+from unittest.mock import MagicMock, patch
+import sys
+sys.path.insert(0, '../proto')
+sys.path.insert(0, '../cplane')
+
+import cplane_pb2
+from server import ControlPlaneServicer
+
+@pytest.fixture
+def servicer():
+    return ControlPlaneServicer()
+
+@pytest.fixture
+def mock_context():
+    ctx = MagicMock()
+    ctx.invocation_metadata.return_value = [
+        ('x-trace-id', 'test-trace-123')
+    ]
+    ctx.is_active.return_value = True
+    return ctx
+
+
+class TestRegisterClient:
+    def test_success(self, servicer, mock_context):
+        request = cplane_pb2.RegisterRequest(
+            client_id="test-dplane-1",
+            tenant_id="tenant-x",
+            auth_token="valid-token",
+            version="1.0.0"
+        )
+        response = servicer.RegisterClient(request, mock_context)
+        assert response.success is True
+        assert response.session_id != ""
+        assert len(response.session_id) == 36  # UUID format
+
+    def test_missing_client_id(self, servicer, mock_context):
+        request = cplane_pb2.RegisterRequest(
+            tenant_id="tenant-x",
+            auth_token="valid-token"
+        )
+        servicer.RegisterClient(request, mock_context)
+        mock_context.abort.assert_called_once_with(
+            grpc.StatusCode.INVALID_ARGUMENT,
+            "client_id and tenant_id are required"
+        )
+
+    def test_missing_auth_token(self, servicer, mock_context):
+        request = cplane_pb2.RegisterRequest(
+            client_id="dplane-1",
+            tenant_id="tenant-x"
+        )
+        servicer.RegisterClient(request, mock_context)
+        mock_context.abort.assert_called_once_with(
+            grpc.StatusCode.UNAUTHENTICATED,
+            "auth_token is required"
+        )
+</code></pre>
+    </div>
+
+    <h3>Integration Testing with a real server</h3>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">tests/test_integration.py</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">import pytest
+import grpc
+import threading
+import time
+from concurrent import futures
+
+@pytest.fixture(scope="module")
+def grpc_server():
+    """Start a real gRPC server for integration tests."""
+    from server import ControlPlaneServicer
+    import cplane_pb2_grpc
+
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
+    cplane_pb2_grpc.add_ControlPlaneServicer_to_server(ControlPlaneServicer(), server)
+    port = server.add_insecure_port('localhost:0')  # random free port
+    server.start()
+    yield port
+    server.stop(grace=1)
+
+@pytest.fixture
+def stub(grpc_server):
+    channel = grpc.insecure_channel(f'localhost:{grpc_server}')
+    yield cplane_pb2_grpc.ControlPlaneStub(channel)
+    channel.close()
+
+
+def test_full_registration_flow(stub):
+    """End-to-end: register → get status."""
+    # Register
+    resp = stub.RegisterClient(cplane_pb2.RegisterRequest(
+        client_id="integration-test-1",
+        tenant_id="test-tenant",
+        auth_token="test-token",
+        version="1.0.0"
+    ))
+    assert resp.success
+    assert resp.session_id
+
+    # Get status
+    status = stub.GetClientStatus(cplane_pb2.GetStatusRequest(
+        client_id="integration-test-1",
+        session_id=resp.session_id
+    ))
+    assert status.client_id == "integration-test-1"
+    assert status.status == cplane_pb2.ACTIVE
+</code></pre>
+    </div>
+  </section>
+
+  <section class="content-section fade-in">
+    <h2><span class="section-icon">🔧</span> grpcurl — Manual gRPC Testing</h2>
+    <p><code>grpcurl</code> is like <code>curl</code> for gRPC. Use it to test your service from the command line without writing client code:</p>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">bash</span><span class="code-filename">grpcurl commands</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-bash"># List services (requires gRPC reflection — see below)
+grpcurl -plaintext localhost:50051 list
+
+# Describe a method
+grpcurl -plaintext localhost:50051 describe cplane.ControlPlane.RegisterClient
+
+# Call RegisterClient with JSON payload
+grpcurl -plaintext -d '{
+  "client_id": "test-dplane-1",
+  "tenant_id": "tenant-abc",
+  "auth_token": "test-token",
+  "version": "1.0.0"
+}' localhost:50051 cplane.ControlPlane/RegisterClient
+
+# Call with metadata (auth header)
+grpcurl -plaintext \
+  -H 'authorization: Bearer eyJhb...' \
+  -d '{"client_id":"test-1","session_id":"abc"}' \
+  localhost:50051 cplane.ControlPlane/GetClientStatus
+</code></pre>
+    </div>
+
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Enable gRPC reflection (for grpcurl)</span><button class="copy-btn">Copy</button></div>
+      <pre><code class="language-python">from grpc_reflection.v1alpha import reflection
+import cplane_pb2
+
+def serve(port=50051):
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    cplane_pb2_grpc.add_ControlPlaneServicer_to_server(ControlPlaneServicer(), server)
+
+    # Enable reflection (allows grpcurl to discover services)
+    SERVICE_NAMES = (
+        cplane_pb2.DESCRIPTOR.services_by_name['ControlPlane'].full_name,
+        reflection.SERVICE_NAME,
+    )
+    reflection.enable_server_reflection(SERVICE_NAMES, server)
+
+    server.add_insecure_port(f'[::]:{port}')
+    server.start()
+    server.wait_for_termination()
+</code></pre>
+    </div>
+  </section>
+
+  <!-- Videos -->
+  <section class="video-section fade-in">
+    <h2>📺 Video Resources</h2>
+    <div class="video-grid">
+      <a href="https://www.youtube.com/watch?v=_Fr10UoFI7Y" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="_Fr10UoFI7Y"><img src="" alt="gRPC OpenTelemetry"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">Unified Observability in gRPC: Metrics and Tracing with OpenTelemetry</div>
+          <div class="video-meta"><span class="video-tag">Observability</span> Official gRPC observability talk (2025)</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=qcxdLHm2LKM" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="qcxdLHm2LKM"><img src="" alt="gRPC Metrics"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">gRPC OpenTelemetry Metrics — Yash Tibrewal, Google</div>
+          <div class="video-meta"><span class="video-tag">Official</span> Google engineer on gRPC metrics</div>
+        </div>
+      </a>
+      <a href="https://www.youtube.com/watch?v=HUf4sETktQY" target="_blank" class="video-card">
+        <div class="video-thumb" data-vid="HUf4sETktQY"><img src="" alt="gRPC OpenTelemetry Go"/><div class="play-overlay"><div class="play-btn">▶</div></div></div>
+        <div class="video-info">
+          <div class="video-title">Monitor gRPC Calls with OpenTelemetry — Go Example</div>
+          <div class="video-meta"><span class="video-tag">Tracing</span> Practical gRPC + OTel integration</div>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- Exercise -->
+  <section class="exercise-section fade-in">
+    <h2>💪 Exercise</h2>
+    <p class="exercise-subtitle">Add health checks and tests.</p>
+    <div class="exercise-tabs">
+      <button class="ex-tab active" data-target="ex9-q">Task</button>
+      <button class="ex-tab" data-target="ex9-a">Solution</button>
+    </div>
+    <div id="ex9-q" class="ex-panel active">
+      <div class="exercise-task">
+        <h3>Implement observability:</h3>
+        <p>
+          1. Add health checking to your server and verify with <code>grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check</code><br/><br/>
+          2. Add a <code>registered_clients</code> Gauge metric and update it in <code>RegisterClient</code> (increment) and <code>DeregisterClient</code> (decrement)<br/><br/>
+          3. Write a pytest test that verifies: registering the same <code>client_id</code> twice returns <code>ALREADY_EXISTS</code><br/><br/>
+          4. Run <code>pytest -v</code> and verify all tests pass
+        </p>
+      </div>
+    </div>
+    <div id="ex9-a" class="ex-panel">
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">python</span><span class="code-filename">Solution</span><button class="copy-btn">Copy</button></div>
+        <pre><code class="language-python"># In RegisterClient:
+from metrics import registered_clients
+connected_clients[request.client_id] = {...}
+registered_clients.inc()
+
+# In DeregisterClient:
+del connected_clients[request.client_id]
+registered_clients.dec()
+
+# Test:
+def test_duplicate_registration(stub):
+    req = cplane_pb2.RegisterRequest(
+        client_id="dup-test", tenant_id="t", auth_token="tok"
+    )
+    stub.RegisterClient(req)  # first: OK
+
+    with pytest.raises(grpc.RpcError) as exc:
+        stub.RegisterClient(req)  # second: ALREADY_EXISTS
+    assert exc.value.code() == grpc.StatusCode.ALREADY_EXISTS
+</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <div style="text-align:center;margin-bottom:32px;">
+    <button class="complete-btn" data-lesson="9">✓ Mark Lesson 9 Complete</button>
+  </div>
+  <div class="completion-banner" data-lesson="9">
+    <h2>🎉 Lesson 9 Complete!</h2>
+    <p>Your service is observable and tested. One lesson left — the capstone where everything comes together into a production-grade mini cplane↔dplane.</p>
+  </div>
+  <div class="lesson-nav">
+    <a href="lesson-08.html" class="lesson-nav-btn btn-prev">← Lesson 8: Security</a>
+    <a href="lesson-10.html" class="lesson-nav-btn btn-next">Lesson 10: Capstone →</a>
+  </div>
+
+</div></main>
+<footer><p>gRPC Mastery · <a href="index.html">Course Home</a> · <a href="https://grpc.io/docs/guides/health-checking/" target="_blank">gRPC Health Checking</a></p></footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
