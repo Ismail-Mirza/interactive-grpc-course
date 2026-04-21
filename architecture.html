@@ -88,14 +88,14 @@ graph TB
     A_GC -->|"TLS + JWT\nOutbound :443"| GW
     B_GC -->|"TLS + JWT\nOutbound :443"| GW
 
-    style customer1 fill:#ecfeff,stroke:#0e7490,stroke-width:2px,stroke-dasharray:6
-    style customer2 fill:#ecfeff,stroke:#0e7490,stroke-width:2px,stroke-dasharray:6
-    style saas fill:#ede9fe,stroke:#4f46e5,stroke-width:2px,stroke-dasharray:6
-    style GW fill:#4f46e5,color:#fff,stroke:#3730a3
-    style A_GC fill:#06b6d4,color:#fff,stroke:#0e7490
-    style B_GC fill:#06b6d4,color:#fff,stroke:#0e7490
-    style AUTH fill:#10b981,color:#fff,stroke:#047857
-    style QUEUE fill:#f59e0b,color:#fff,stroke:#d97706
+    style customer1 fill:#f6f6f6,stroke:#d0d0d0,stroke-width:2px,stroke-dasharray:6
+    style customer2 fill:#f6f6f6,stroke:#d0d0d0,stroke-width:2px,stroke-dasharray:6
+    style saas fill:#fafafa,stroke:#a1a1aa,stroke-width:2px,stroke-dasharray:6
+    style GW fill:#18181b,color:#fff,stroke:#18181b
+    style A_GC fill:#3f3f46,color:#fff,stroke:#3f3f46
+    style B_GC fill:#3f3f46,color:#fff,stroke:#3f3f46
+    style AUTH fill:#16a34a,color:#fff,stroke:#15803d
+    style QUEUE fill:#d97706,color:#fff,stroke:#b45309
       </div>
     </div>
   </section>
@@ -103,11 +103,121 @@ graph TB
   <!-- Section 2: Connection Lifecycle -->
   <section class="content-section fade-in">
     <h2><span class="section-icon">🔄</span> Connection Lifecycle</h2>
-    <p>Understanding the exact sequence of events from agent startup through steady-state operation and reconnection is critical for building reliable systems.</p>
+    <p>Understanding the exact sequence of events from agent startup through steady-state operation and reconnection is critical for building reliable systems. Step through each phase below:</p>
 
-    <div class="arch-diagram">
-      <p style="font-weight:700;margin-bottom:16px;">Agent Connection Lifecycle</p>
-      <div class="mermaid">
+    <!-- Interactive lifecycle stepper -->
+    <div class="stepper">
+      <div class="stepper-tabs">
+        <button class="stepper-tab"><span class="step-num">1</span>Startup</button>
+        <button class="stepper-tab"><span class="step-num">2</span>Auth</button>
+        <button class="stepper-tab"><span class="step-num">3</span>Register</button>
+        <button class="stepper-tab"><span class="step-num">4</span>Streaming</button>
+        <button class="stepper-tab"><span class="step-num">5</span>Reconnect</button>
+      </div>
+      <div class="stepper-panels">
+
+        <div class="stepper-panel">
+          <h4>Phase 1 — Agent Startup</h4>
+          <p>The data plane agent process starts. It reads its config (control plane host, client credentials, CA certificate path) and begins the connection sequence.</p>
+          <div class="typewriter-wrap">
+            <span class="typewriter-line" style="color:#71717a;"># agent starts, loads config</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">agent = DataPlaneAgent(</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">&nbsp;&nbsp;&nbsp;&nbsp;agent_id=<span style="color:#a3e635;">"agent-customer-a"</span>,</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">&nbsp;&nbsp;&nbsp;&nbsp;cplane_host=<span style="color:#a3e635;">"cplane.example.com:443"</span>,</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">)</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">agent.run()  <span style="color:#71717a;"># blocking — runs forever</span></span>
+          </div>
+          <div class="conn-indicator" style="margin-top:12px;">
+            <div class="conn-status-dot disconnected"></div>
+            <span class="conn-status-label">Not connected</span>
+            <span class="conn-status-detail">Starting up...</span>
+          </div>
+        </div>
+
+        <div class="stepper-panel">
+          <h4>Phase 2 — JWT Authentication</h4>
+          <p>Before connecting, the agent fetches a short-lived JWT from the auth service using its client credentials. This token proves the agent's identity and tenant membership to the control plane.</p>
+          <div class="typewriter-wrap">
+            <span class="typewriter-line" style="color:#71717a;"># POST /token → { access_token, expires_in }</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">token = token_manager.get_token()</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">call_creds = grpc.access_token_call_credentials(token)</span>
+            <span class="typewriter-line" style="color:#71717a;"># JWT payload: { sub, tenant_id, exp, iat }</span>
+          </div>
+          <div class="conn-indicator" style="margin-top:12px;">
+            <div class="conn-status-dot connecting"></div>
+            <span class="conn-status-label">Authenticating</span>
+            <span class="conn-status-detail">Fetching JWT — exp in 3600s</span>
+          </div>
+        </div>
+
+        <div class="stepper-panel">
+          <h4>Phase 3 — Agent Registration (Unary RPC)</h4>
+          <p>The agent calls the <code>RegisterAgent</code> unary RPC. The control plane verifies the JWT, stores the agent in the registry, and returns a session ID and heartbeat interval.</p>
+          <div class="typewriter-wrap">
+            <span class="typewriter-line" style="color:#71717a;"># One-shot unary call to announce presence</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">resp = stub.RegisterAgent(RegisterRequest(</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">&nbsp;&nbsp;&nbsp;&nbsp;agent_id=<span style="color:#a3e635;">"agent-customer-a"</span>,</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">&nbsp;&nbsp;&nbsp;&nbsp;capabilities=[<span style="color:#a3e635;">"run_query"</span>, <span style="color:#a3e635;">"reload_config"</span>],</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">))</span>
+            <span class="typewriter-line" style="color:#71717a;"># → session_id, heartbeat_interval_sec=30</span>
+          </div>
+          <div class="conn-indicator" style="margin-top:12px;">
+            <div class="conn-status-dot connecting"></div>
+            <span class="conn-status-label">Registering</span>
+            <span class="conn-status-detail">session_id assigned by server</span>
+          </div>
+        </div>
+
+        <div class="stepper-panel">
+          <h4>Phase 4 — Bidirectional Streaming (Steady State)</h4>
+          <p>The agent opens the <code>AgentStream</code> bidirectional RPC. A background heartbeat thread sends pings every 30s. The server pushes commands as they arrive. The agent processes them and streams results back.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0;font-size:12px;">
+            <div style="border:1px solid var(--border);border-radius:8px;padding:10px;">
+              <div style="font-weight:700;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Agent → Cloud</div>
+              <div style="color:var(--text-2);line-height:2.1;">♡ Heartbeat(metrics)<br/>✅ CommandResult(RUNNING)<br/>✅ CommandResult(COMPLETED)</div>
+            </div>
+            <div style="border:1px solid var(--border);border-radius:8px;padding:10px;">
+              <div style="font-weight:700;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Cloud → Agent</div>
+              <div style="color:var(--text-2);line-height:2.1;">♡ HeartbeatAck<br/>⚡ Command(run_query)<br/>🔄 ConfigUpdate(v2)</div>
+            </div>
+          </div>
+          <div class="conn-indicator">
+            <div class="conn-status-dot connected"></div>
+            <span class="conn-status-label">Connected</span>
+            <span class="conn-status-detail">Stream active — last heartbeat 12s ago</span>
+          </div>
+        </div>
+
+        <div class="stepper-panel">
+          <h4>Phase 5 — Reconnection with Backoff</h4>
+          <p>If the connection drops, the agent catches the gRPC error, waits using <strong>exponential backoff with jitter</strong>, refreshes the JWT, and reconnects. The server handles the re-registration and resumes any pending commands.</p>
+          <div class="typewriter-wrap">
+            <span class="typewriter-line" style="color:#71717a;"># connection dropped — grpc.StatusCode.UNAVAILABLE</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">delay = backoff.next_delay()  <span style="color:#71717a;"># 1 → 2 → 4 → 8 → ... → 60</span></span>
+            <span class="typewriter-line" style="color:#e5e5ea;">time.sleep(delay)</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">token = token_manager.get_token()  <span style="color:#71717a;"># refresh if needed</span></span>
+            <span class="typewriter-line" style="color:#e5e5ea;">self._connect_and_stream()  <span style="color:#71717a;"># restart loop</span></span>
+          </div>
+          <div class="conn-indicator" style="margin-top:12px;">
+            <div class="conn-status-dot connecting"></div>
+            <span class="conn-status-label">Reconnecting</span>
+            <span class="conn-status-detail">Attempt 2 of ∞ — waiting 2.3s (with jitter)</span>
+          </div>
+        </div>
+
+        <div class="stepper-controls">
+          <button class="stepper-btn secondary" style="color:var(--text-muted);">← Prev</button>
+          <button class="stepper-btn primary">Next →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full sequence for reference -->
+    <div class="explainer">
+      <button class="explainer-trigger">Show full sequence diagram</button>
+      <div class="explainer-body">
+        <div class="arch-diagram" style="margin:0;">
+          <div class="mermaid">
 sequenceDiagram
     participant A as Data Plane Agent
     participant CP as Control Plane
@@ -117,35 +227,29 @@ sequenceDiagram
     Note over A: Agent starts up
     A->>Auth: POST /token {client_id, secret}
     Auth-->>A: JWT {sub, tenant, exp}
-
     A->>CP: TCP connect (TLS handshake)
-    Note over CP: Verify TLS certificate
-
-    A->>CP: RegisterAgent(agent_id, tenant_id, version, capabilities)
+    A->>CP: RegisterAgent(agent_id, capabilities)
     CP->>Auth: verify JWT token
-    Auth-->>CP: token valid
+    Auth-->>CP: valid
     CP->>DB: INSERT agent_registry
-    DB-->>CP: ok
-    CP-->>A: RegisterResponse(session_id, server_time)
+    CP-->>A: RegisterResponse(session_id)
 
     Note over A,CP: Bidirectional stream open
 
     loop Steady state
-        A->>CP: Heartbeat(session_id, metrics)
-        CP-->>A: HeartbeatAck OR Command(action, payload)
-        A->>CP: CommandResult(command_id, status, output)
+        A->>CP: Heartbeat(metrics)
+        CP-->>A: HeartbeatAck OR Command
+        A->>CP: CommandResult(status, output)
     end
 
-    Note over A: Network interruption
-    A-xCP: connection dropped
-
-    Note over A: Exponential backoff (1s → 2s → 4s → ... → 60s)
-    A->>Auth: POST /token (refresh)
-    Auth-->>A: new JWT
-    A->>CP: TCP reconnect (TLS)
-    A->>CP: RegisterAgent (same agent_id)
-    CP->>DB: UPDATE agent_registry (reconnect)
-    CP-->>A: RegisterResponse (new session_id)
+    Note over A: Network drop
+    A-xCP: connection lost
+    Note over A: Exponential backoff + token refresh
+    A->>CP: Reconnect + RegisterAgent
+    CP->>DB: UPDATE agent_registry
+    CP-->>A: RegisterResponse(new session_id)
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -155,31 +259,71 @@ sequenceDiagram
     <h2><span class="section-icon">📨</span> Command & Callback Flow</h2>
     <p>Once the agent is registered and streaming, the control plane can push commands at any time. The agent processes them and sends callbacks — all over the same persistent stream.</p>
 
-    <div class="arch-diagram">
-      <p style="font-weight:700;margin-bottom:16px;">Command Push and Callback Pattern</p>
-      <div class="mermaid">
-sequenceDiagram
-    participant API as REST API<br/>(Control Plane)
-    participant Q as Message Queue
-    participant CP as gRPC Stream Handler
-    participant A as Data Plane Agent
-
-    Note over API,A: Operator triggers a command via REST API
-
-    API->>Q: enqueue command {agent_id, action, params}
-    Q-->>CP: dequeue for active agent session
-    CP-->>A: Command{id, action="run_query", payload}
-
-    Note over A: Agent executes locally
-    A->>CP: CommandResult{id, status=RUNNING, progress=20%}
-    CP->>Q: publish status update
-    A->>CP: CommandResult{id, status=RUNNING, progress=80%}
-    CP->>Q: publish status update
-    A->>CP: CommandResult{id, status=COMPLETED, output=data}
-    CP->>Q: publish final result
-    Q-->>API: notify completion
-    Note over API: Webhook / polling available to client
+    <!-- Animated flow visualization -->
+    <div class="flow-viz" data-auto="1300">
+      <div class="flow-actors">
+        <div class="flow-actor">
+          <div class="flow-actor-box">REST API</div>
+          <div class="flow-actor-label">Operator / UI</div>
+        </div>
+        <div class="flow-actor">
+          <div class="flow-actor-box">Message Queue</div>
+          <div class="flow-actor-label">Redis / Kafka</div>
+        </div>
+        <div class="flow-actor">
+          <div class="flow-actor-box server">gRPC Handler</div>
+          <div class="flow-actor-label">Control Plane</div>
+        </div>
+        <div class="flow-actor">
+          <div class="flow-actor-box">Agent</div>
+          <div class="flow-actor-label">Data Plane</div>
+        </div>
       </div>
+
+      <ul class="flow-steps-list">
+        <li class="flow-step">
+          <span class="flow-step-icon">1️⃣</span>
+          <div class="flow-step-text">
+            <span class="flow-step-label">Operator submits command via REST API</span>
+            <span class="flow-step-detail">POST /api/agents/{id}/commands — action=run_query, params={sql:...}</span>
+          </div>
+        </li>
+        <li class="flow-step">
+          <span class="flow-step-icon">2️⃣</span>
+          <div class="flow-step-text">
+            <span class="flow-step-label">API enqueues to Message Queue</span>
+            <span class="flow-step-detail">Command persisted — survives agent disconnects, guarantees delivery</span>
+          </div>
+        </li>
+        <li class="flow-step">
+          <span class="flow-step-icon">3️⃣</span>
+          <div class="flow-step-text">
+            <span class="flow-step-label">Queue dequeued by gRPC Stream Handler</span>
+            <span class="flow-step-detail">Handler looks up the active session for the target agent_id</span>
+          </div>
+        </li>
+        <li class="flow-step">
+          <span class="flow-step-icon">4️⃣</span>
+          <div class="flow-step-text">
+            <span class="flow-step-label">Command pushed to Agent over open stream</span>
+            <span class="flow-step-detail">ServerMessage { command: Command { id, action, params, timeout_sec } }</span>
+          </div>
+        </li>
+        <li class="flow-step">
+          <span class="flow-step-icon">5️⃣</span>
+          <div class="flow-step-text">
+            <span class="flow-step-label">Agent executes locally — streams progress back</span>
+            <span class="flow-step-detail">CommandResult(RUNNING, 30%) → CommandResult(RUNNING, 80%) → CommandResult(COMPLETED)</span>
+          </div>
+        </li>
+        <li class="flow-step">
+          <span class="flow-step-icon">6️⃣</span>
+          <div class="flow-step-text">
+            <span class="flow-step-label">Final result published — API client notified</span>
+            <span class="flow-step-detail">Webhook callback or polling endpoint delivers output to the caller</span>
+          </div>
+        </li>
+      </ul>
     </div>
 
     <div class="callout info">
@@ -1127,10 +1271,10 @@ graph TB
 
     AGENT -->|"TLS :443\noutbound only"| SVC
 
-    style yourcloud fill:#ede9fe,stroke:#4f46e5,stroke-width:2px,stroke-dasharray:6
-    style custenv fill:#ecfeff,stroke:#0e7490,stroke-width:2px,stroke-dasharray:6
-    style CP_DEPLOY fill:#4f46e5,color:#fff
-    style AGENT fill:#06b6d4,color:#fff
+    style yourcloud fill:#fafafa,stroke:#a1a1aa,stroke-width:2px,stroke-dasharray:6
+    style custenv fill:#f6f6f6,stroke:#d0d0d0,stroke-width:2px,stroke-dasharray:6
+    style CP_DEPLOY fill:#18181b,color:#fff
+    style AGENT fill:#3f3f46,color:#fff
       </div>
     </div>
 
@@ -1289,8 +1433,8 @@ graph LR
     D4 --> P4
     D5 --> P5
 
-    style demo fill:#fef3c7,stroke:#d97706,stroke-width:1px
-    style prod fill:#d1fae5,stroke:#10b981,stroke-width:1px
+    style demo fill:#fafafa,stroke:#d0d0d0,stroke-width:1px
+    style prod fill:#f0fdf4,stroke:#bbf7d0,stroke-width:1px
       </div>
     </div>
   </section>

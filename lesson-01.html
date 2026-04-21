@@ -45,34 +45,36 @@
     <p>gRPC (Google Remote Procedure Call) is a high-performance, open-source framework for building APIs. Instead of sending JSON over HTTP/1.1 like REST, gRPC sends binary <strong>Protocol Buffer</strong> messages over <strong>HTTP/2</strong>.</p>
     <p>Think of it like this: REST is a postcard (text, slow, one message at a time). gRPC is a dedicated phone line (binary, fast, bidirectional, always open).</p>
 
-    <div class="arch-diagram">
-      <p style="font-weight:700;margin-bottom:16px;color:var(--text);">REST vs gRPC Communication Model</p>
-      <div class="mermaid">
-sequenceDiagram
-    participant C as Client
-    participant S as Server
+    <!-- Interactive animated comparison -->
+    <div class="anim-demo">
+      <div class="anim-demo-title">Live — Connection Model Comparison</div>
+      <div class="proto-compare">
 
-    rect rgb(254,226,226)
-        Note over C,S: REST (HTTP/1.1) — New connection per request
-        C->>S: TCP connect
-        C->>S: GET /api/data
-        S-->>C: {"key":"value"}
-        Note over C,S: disconnect
-        C->>S: TCP connect again
-        C->>S: POST /api/cmd
-        S-->>C: 200 OK
-    end
+        <div class="proto-lane">
+          <div class="proto-lane-label"><span class="dot-rest"></span> REST / HTTP 1.1</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">New TCP connection per request — gaps between calls</div>
+          <div class="pipe-container">
+            <div class="pipe-line"></div>
+            <div class="tcp-flash">new tcp connect</div>
+            <div class="packet pkt-rest">GET</div>
+          </div>
+          <div style="font-size:11px;color:var(--danger);margin-top:8px;font-weight:600;">⚠ Overhead: connect → request → disconnect → repeat</div>
+        </div>
 
-    rect rgb(220,252,231)
-        Note over C,S: gRPC (HTTP/2) — Persistent multiplexed connection
-        C->>S: Single TCP connect
-        C->>S: Stream 1: request
-        S-->>C: Stream 1: response
-        C->>S: Stream 2: heartbeat
-        S-->>C: Stream 2: ack
-        C->>S: Stream 3: metrics
-        S-->>C: Stream 3: commands
-    end
+        <div class="proto-lane">
+          <div class="proto-lane-label"><span class="dot-grpc"></span> gRPC / HTTP 2</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Single connection, 3 multiplexed streams simultaneously</div>
+          <div class="pipe-container">
+            <div class="pipe-line"></div>
+            <div class="pipe-line"></div>
+            <div class="pipe-line"></div>
+            <div class="packet pkt-grpc-1">RPC</div>
+            <div class="packet pkt-grpc-2">♡ hb</div>
+            <div class="packet pkt-grpc-3">ACK</div>
+          </div>
+          <div style="font-size:11px;color:var(--success);margin-top:8px;font-weight:600;">✓ One persistent connection, concurrent streams</div>
+        </div>
+
       </div>
     </div>
   </section>
@@ -168,7 +170,85 @@ sequenceDiagram
       </div>
     </div>
 
-    <div class="arch-diagram">
+    <!-- Interactive step-through: How does dplane connect to cplane? -->
+    <div class="stepper">
+      <div class="stepper-tabs">
+        <button class="stepper-tab"><span class="step-num">1</span>The Problem</button>
+        <button class="stepper-tab"><span class="step-num">2</span>Outbound Connect</button>
+        <button class="stepper-tab"><span class="step-num">3</span>Bidi Stream Open</button>
+        <button class="stepper-tab"><span class="step-num">4</span>Commands Flow</button>
+        <button class="stepper-tab"><span class="step-num">5</span>Reconnect</button>
+      </div>
+      <div class="stepper-panels">
+
+        <div class="stepper-panel">
+          <h4>The Firewall Problem</h4>
+          <p>Your SaaS cloud cannot reach data planes running inside customer networks — corporate firewalls block all inbound connections. A REST webhook or inbound API call from your cloud to their server will simply fail.</p>
+          <div class="conn-indicator">
+            <div class="conn-status-dot disconnected"></div>
+            <span class="conn-status-label">Cloud → Customer</span>
+            <span class="conn-status-detail">❌ Blocked by firewall — inbound port closed</span>
+          </div>
+        </div>
+
+        <div class="stepper-panel">
+          <h4>Data Plane Opens Outbound Connection</h4>
+          <p>The data plane agent starts up and opens an <strong>outbound</strong> TLS connection to your cloud on port 443 — exactly like a browser visiting a website. Corporate firewalls allow this.</p>
+          <div class="conn-indicator">
+            <div class="conn-status-dot connecting"></div>
+            <span class="conn-status-label">Customer → Cloud</span>
+            <span class="conn-status-detail">Outbound :443 TLS — firewall allows this ✓</span>
+          </div>
+          <div class="typewriter-wrap" style="margin-top:12px;">
+            <span class="typewriter-line" style="color:#71717a;"># Data plane initiates — NO inbound required</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">channel = grpc.secure_channel(<span style="color:#a3e635;">"cplane.example.com:443"</span>, creds)</span>
+            <span class="typewriter-line" style="color:#e5e5ea;">stub    = ControlPlaneStub(channel)</span>
+          </div>
+        </div>
+
+        <div class="stepper-panel">
+          <h4>Bidirectional Stream is Open</h4>
+          <p>After registering, the data plane calls <code>AgentStream()</code> which opens a persistent <strong>bidirectional gRPC stream</strong>. Both sides can now send messages at any time over this single connection.</p>
+          <div class="conn-indicator">
+            <div class="conn-status-dot connected"></div>
+            <span class="conn-status-label">Stream Active</span>
+            <span class="conn-status-detail">TLS + JWT authenticated — full duplex open</span>
+          </div>
+        </div>
+
+        <div class="stepper-panel">
+          <h4>Commands Flow Both Ways</h4>
+          <p>The control plane pushes commands through the open stream at any time. The data plane sends heartbeats, metrics, and command results back — <strong>all over the same connection</strong>.</p>
+          <div style="display:flex;gap:24px;margin:12px 0;font-size:13px;">
+            <div style="flex:1;border:1px solid var(--border);border-radius:8px;padding:12px;">
+              <div style="font-weight:700;margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);">Data Plane → Cloud</div>
+              <div style="color:var(--text-2);line-height:2;">♡ Heartbeat every 30s<br/>📊 Metrics<br/>✅ Command results</div>
+            </div>
+            <div style="flex:1;border:1px solid var(--border);border-radius:8px;padding:12px;">
+              <div style="font-weight:700;margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);">Cloud → Data Plane</div>
+              <div style="color:var(--text-2);line-height:2;">⚡ Commands<br/>🔄 Config updates<br/>♡ HeartbeatAck</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stepper-panel">
+          <h4>Automatic Reconnection</h4>
+          <p>If the connection drops (network hiccup, server restart), the data plane detects this and reconnects using <strong>exponential backoff</strong> — 1s, 2s, 4s, 8s… up to 60s — then re-opens the stream. No manual intervention needed.</p>
+          <div class="conn-indicator">
+            <div class="conn-status-dot connecting"></div>
+            <span class="conn-status-label">Reconnecting...</span>
+            <span class="conn-status-detail">Attempt 3 — backoff delay 4.0s — then retry</span>
+          </div>
+        </div>
+
+        <div class="stepper-controls">
+          <button class="stepper-btn secondary" style="color:var(--text-muted);">← Prev</button>
+          <button class="stepper-btn primary">Next →</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="arch-diagram" style="margin-top:20px;">
       <p style="font-weight:700;margin-bottom:16px;">B2B Deployment Architecture — Control Plane ↔ Data Plane</p>
       <div class="mermaid">
 graph LR
@@ -189,21 +269,8 @@ graph LR
     GC -->|"TLS + JWT\nBidi Stream\nOutbound only"| GS
     GS --> CR
     GS --> AUTH
-
-    style customer fill:#ecfeff,stroke:#0e7490,stroke-width:2px,stroke-dasharray:6
-    style cloud fill:#ede9fe,stroke:#4f46e5,stroke-width:2px,stroke-dasharray:6
-    style GC fill:#06b6d4,color:#fff,stroke:#0e7490
-    style GS fill:#4f46e5,color:#fff,stroke:#3730a3
       </div>
     </div>
-
-    <p>The key insight: <strong>the data plane opens the connection outbound</strong>. This means:</p>
-    <ul>
-      <li>No inbound firewall rules needed on the customer's side — standard outbound HTTPS (443) is enough</li>
-      <li>The control plane can push commands to the data plane through the open stream</li>
-      <li>Heartbeats detect failures instantly and trigger reconnection</li>
-      <li>Multiple data plane instances can connect to one control plane simultaneously</li>
-    </ul>
   </section>
 
   <!-- Section 6: When NOT to use gRPC -->

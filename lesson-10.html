@@ -17,7 +17,7 @@
   </div>
 </nav>
 
-<header class="lesson-hero" style="background: linear-gradient(135deg, #1e1b4b 0%, #4f46e5 50%, #06b6d4 100%);">
+<header class="lesson-hero">
   <div class="container">
     <div class="lesson-badge" style="background:rgba(255,255,255,.25);">🏆 Lesson 10 of 10 · Capstone</div>
     <h1>Production cplane↔dplane</h1>
@@ -32,7 +32,7 @@
 
 <main><div class="container">
 
-  <section class="content-section fade-in" style="border:2px solid var(--primary);">
+  <section class="content-section fade-in" style="border:2px solid var(--border-strong);">
     <h2><span class="section-icon">🗺️</span> What We're Building</h2>
     <p>A complete mini cplane↔dplane system incorporating every lesson:</p>
 
@@ -67,10 +67,10 @@ graph TB
 
     GC -->|"TLS / JWT\nBidi Stream\nHeartbeat + Commands"| GS
 
-    style dplane fill:#ecfeff,stroke:#0e7490,stroke-width:2px,stroke-dasharray:6
-    style cplane fill:#ede9fe,stroke:#4f46e5,stroke-width:2px,stroke-dasharray:6
-    style GC fill:#06b6d4,color:#fff,stroke:#0e7490
-    style GS fill:#4f46e5,color:#fff,stroke:#3730a3
+    style dplane fill:#f6f6f6,stroke:#d0d0d0,stroke-width:2px,stroke-dasharray:6
+    style cplane fill:#fafafa,stroke:#a1a1aa,stroke-width:2px,stroke-dasharray:6
+    style GC fill:#3f3f46,color:#fff,stroke:#3f3f46
+    style GS fill:#18181b,color:#fff,stroke:#18181b
       </div>
     </div>
   </section>
@@ -572,13 +572,13 @@ docker-compose down</code></pre>
     </div>
   </section>
 
-  <div style="background:linear-gradient(135deg,#1e1b4b,#4f46e5);color:white;border-radius:var(--radius-lg);padding:48px;text-align:center;margin-bottom:32px;">
+  <div style="background:var(--text);color:white;border-radius:var(--radius-lg);padding:48px;text-align:center;margin-bottom:32px;">
     <div style="font-size:48px;margin-bottom:16px;">🎓</div>
     <h2 style="font-size:32px;margin-bottom:12px;">Course Complete!</h2>
-    <p style="opacity:.9;max-width:600px;margin:0 auto 24px;">You've mastered gRPC from Protocol Buffers to production-grade bidirectional streaming. You now understand the foundation that all production B2B control plane systems are built on.</p>
+    <p style="opacity:.75;max-width:600px;margin:0 auto 24px;">You've mastered gRPC from Protocol Buffers to production-grade bidirectional streaming. You now understand the foundation that all production B2B control plane systems are built on.</p>
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
-      <a href="lesson-01.html" style="background:rgba(255,255,255,.2);color:white;text-decoration:none;padding:10px 20px;border-radius:var(--radius);font-weight:600;border:1px solid rgba(255,255,255,.3);">Review from start</a>
-      <a href="index.html" style="background:white;color:var(--primary);text-decoration:none;padding:10px 20px;border-radius:var(--radius);font-weight:600;">View all lessons</a>
+      <a href="lesson-01.html" style="background:rgba(255,255,255,.12);color:white;text-decoration:none;padding:10px 20px;border-radius:var(--radius);font-weight:600;border:1px solid rgba(255,255,255,.25);">Review from start</a>
+      <a href="index.html" style="background:white;color:var(--text);text-decoration:none;padding:10px 20px;border-radius:var(--radius);font-weight:600;">View all lessons</a>
     </div>
   </div>
 
